@@ -40,13 +40,35 @@ def extract_tweet_text_features(tweet: Tweet) -> np.ndarray:
         tweet: Tweet object
 
     Returns:
-        Array of text features [1 dummy feature]
+        Array of text features [6 features]
     """
-    text = tweet.text
-
-    #TODO: Implement actual text feature extraction (e.g., sentiment, length, embeddings) if useful
-
-    return np.zeros(1, dtype=np.float32)
+    text = tweet.text or ""
+    
+    # Text length features
+    text_length = len(text)
+    word_count = len(text.split()) if text else 0
+    
+    # Character-level features
+    uppercase_count = sum(1 for c in text if c.isupper())
+    uppercase_ratio = uppercase_count / max(text_length, 1)
+    
+    # Punctuation count
+    punctuation_chars = ".,!?;:-\"\'()[]{}"
+    punctuation_count = sum(1 for c in text if c in punctuation_chars)
+    punctuation_ratio = punctuation_count / max(text_length, 1)
+    
+    # Exclamation/question marks (engagement indicators)
+    has_exclamation = 1.0 if "!" in text else 0.0
+    has_question = 1.0 if "?" in text else 0.0
+    
+    return np.array([
+        text_length,              # Character count
+        word_count,               # Word count
+        uppercase_ratio,          # Uppercase ratio
+        punctuation_ratio,        # Punctuation ratio
+        has_exclamation,          # Contains exclamation mark
+        has_question,             # Contains question mark
+    ], dtype=np.float32)
 
 
 def extract_tweet_entity_features(tweet: Tweet) -> np.ndarray:
@@ -69,19 +91,24 @@ def extract_tweet_entity_features(tweet: Tweet) -> np.ndarray:
     ], dtype=np.float32)
 
 
-def extract_tweet_engagement_features(tweet: Tweet) -> np.ndarray:
+def extract_tweet_engagement_features(
+    tweet: Tweet, 
+    replies_count: int = 0
+) -> np.ndarray:
     """
     Extract engagement features from a tweet.
 
     Args:
         tweet: Tweet object
+        replies_count: Number of replies this tweet received (from thread structure)
 
     Returns:
-        Array of engagement features [2 features]
+        Array of engagement features [3 features]
     """
     return np.array([
         np.log1p(tweet.retweet_count),       # Log retweet count
         np.log1p(tweet.favorite_count),      # Log favorite count
+        np.log1p(replies_count),             # Log replies count
     ], dtype=np.float32)
 
 
@@ -102,16 +129,22 @@ def extract_tweet_metadata_features(tweet: Tweet) -> np.ndarray:
     ], dtype=np.float32)
 
 
-def extract_tweet_features(tweet: Tweet, include_text: bool = True) -> np.ndarray:
+def extract_tweet_features(
+    tweet: Tweet, 
+    include_text: bool = True,
+    replies_count: int = 0
+) -> np.ndarray:
     """
     Extract all numerical features from a tweet.
 
     Args:
         tweet: Tweet object
         include_text: Whether to include text-based features
+        replies_count: Number of replies this tweet received
 
     Returns:
-        Array of tweet features [15 features total]
+        Array of tweet features [16 base features: 6 text + 4 entity + 3 engagement + 3 metadata]
+        Note: Temporal features (6) and positional encoding (16) are added separately
     """
     features = []
 
@@ -119,7 +152,7 @@ def extract_tweet_features(tweet: Tweet, include_text: bool = True) -> np.ndarra
         features.append(extract_tweet_text_features(tweet))
 
     features.append(extract_tweet_entity_features(tweet))
-    features.append(extract_tweet_engagement_features(tweet))
+    features.append(extract_tweet_engagement_features(tweet, replies_count))
     features.append(extract_tweet_metadata_features(tweet))
 
     return np.concatenate(features)
@@ -188,6 +221,107 @@ def extract_user_metadata_features(user: TwitterUser) -> np.ndarray:
     ], dtype=np.float32)
 
 
+def extract_user_timezone_features(user: TwitterUser) -> np.ndarray:
+    """
+    Extract timezone features from a user.
+    
+    Args:
+        user: TwitterUser object
+        
+    Returns:
+        Array of timezone features [2 features]
+    """
+    # Timezone (encode as hash-based feature or one-hot, but use simple numeric encoding)
+    # Most timezones are None, so we encode presence and use offset if available
+    has_timezone = 1.0 if user.time_zone else 0.0
+    
+    # UTC offset (in seconds, normalized)
+    # Most offsets are None, so default to 0
+    if user.utc_offset is not None:
+        # Normalize to [-1, 1] range (offsets are typically -43200 to 50400 seconds)
+        # Divide by 43200 (12 hours in seconds) to normalize
+        normalized_offset = user.utc_offset / 43200.0
+        # Clamp to [-1, 1]
+        normalized_offset = max(-1.0, min(1.0, normalized_offset))
+    else:
+        normalized_offset = 0.0
+    
+    return np.array([
+        has_timezone,          # Has timezone set
+        normalized_offset,     # Normalized UTC offset
+    ], dtype=np.float32)
+
+
+def extract_user_description_features(user: TwitterUser) -> np.ndarray:
+    """
+    Extract description text features from a user.
+    
+    Args:
+        user: TwitterUser object
+        
+    Returns:
+        Array of description features [4 features]
+    """
+    description = user.description or ""
+    
+    # Description length features
+    desc_length = len(description)
+    desc_word_count = len(description.split()) if description else 0
+    
+    # Has description
+    has_description = 1.0 if description else 0.0
+    
+    # Description has URL
+    has_url = 1.0 if description and ("http://" in description or "https://" in description) else 0.0
+    
+    return np.array([
+        desc_length,           # Description character count
+        desc_word_count,       # Description word count
+        has_description,       # Has description
+        has_url,              # Description contains URL
+    ], dtype=np.float32)
+
+
+def extract_user_profile_age_features(user: TwitterUser) -> np.ndarray:
+    """
+    Extract profile creation time features from a user.
+    
+    Args:
+        user: TwitterUser object
+        
+    Returns:
+        Array of profile age features [2 features]
+    """
+    try:
+        created_at = parse_twitter_timestamp(user.created_at)
+        # Reference time: 2015-01-01 (approximate dataset timeframe)
+        if created_at.tzinfo:
+            reference_epoch = datetime(2015, 1, 1, tzinfo=created_at.tzinfo)
+        else:
+            reference_epoch = datetime(2015, 1, 1)
+        
+        # Account age in days (how old the account was at reference time)
+        # created_at is when account was created, reference_epoch is when we're measuring from
+        age_delta = (reference_epoch - created_at).total_seconds() / 86400.0  # Convert to days
+        # Handle negative deltas (account created after reference)
+        age_delta = max(0, age_delta)
+        # Log-scale for better distribution (accounts can be years old)
+        account_age_log = np.log1p(age_delta)
+        
+        # Years since creation (for context)
+        account_age_years = age_delta / 365.25
+        
+    except (ValueError, AttributeError, TypeError):
+        # If creation time is missing or invalid, use defaults
+        account_age_log = 0.0
+        account_age_years = 0.0
+    
+    return np.array([
+        account_age_log,       # Log account age in days
+        account_age_years,     # Account age in years
+    ], dtype=np.float32)
+
+
 def extract_user_features(user: TwitterUser) -> np.ndarray:
     """
     Extract all numerical features from a user.
@@ -196,12 +330,15 @@ def extract_user_features(user: TwitterUser) -> np.ndarray:
         user: TwitterUser object
 
     Returns:
-        Array of user features [13 features total]
+        Array of user features [21 features total: 7 profile + 3 activity + 3 metadata + 2 timezone + 4 description + 2 profile age]
     """
     return np.concatenate([
-        extract_user_profile_features(user),
-        extract_user_activity_features(user),
-        extract_user_metadata_features(user),
+        extract_user_profile_features(user),      # 7 features
+        extract_user_activity_features(user),     # 3 features
+        extract_user_metadata_features(user),     # 3 features
+        extract_user_timezone_features(user),     # 2 features
+        extract_user_description_features(user),  # 4 features
+        extract_user_profile_age_features(user),  # 2 features
     ])
 
 
@@ -221,13 +358,65 @@ def extract_temporal_features(
         reference_time: Reference time for relative features (e.g., thread start time)
 
     Returns:
-        Array of temporal features [1 dummy feature for now]
+        Array of temporal features [6 features]
     """
     created_at = parse_twitter_timestamp(tweet.created_at)
+    
+    # Hour of day (0-23)
+    hour = created_at.hour
+    # Normalize using sin/cos encoding for cyclical nature
+    hour_sin = np.sin(2 * np.pi * hour / 24)
+    hour_cos = np.cos(2 * np.pi * hour / 24)
+    
+    # Day of week (0=Monday, 6=Sunday)
+    day_of_week = created_at.weekday()
+    # Normalize using sin/cos encoding
+    day_sin = np.sin(2 * np.pi * day_of_week / 7)
+    day_cos = np.cos(2 * np.pi * day_of_week / 7)
+    
+    # Time since reference (in seconds, log-scaled)
+    if reference_time is not None:
+        time_delta = (created_at - reference_time).total_seconds()
+        # Handle negative deltas (shouldn't happen, but be safe)
+        time_since_ref = np.log1p(max(time_delta, 0))
+    else:
+        time_since_ref = 0.0
+    
+    # Unix timestamp (normalized, log-scaled for better distribution)
+    timestamp = created_at.timestamp()
+    # Normalize by subtracting a reference epoch (e.g., 2015-01-01) and log-scale
+    if created_at.tzinfo:
+        epoch_2015 = datetime(2015, 1, 1, tzinfo=created_at.tzinfo).timestamp()
+    else:
+        epoch_2015 = datetime(2015, 1, 1).timestamp()
+    normalized_timestamp = np.log1p(max(timestamp - epoch_2015, 0))
+    
+    return np.array([
+        hour_sin,                  # Hour (sin encoding)
+        hour_cos,                  # Hour (cos encoding)
+        day_sin,                   # Day of week (sin encoding)
+        day_cos,                   # Day of week (cos encoding)
+        time_since_ref,            # Time since reference (log seconds)
+        normalized_timestamp,      # Normalized timestamp
+    ], dtype=np.float32)
 
-    #TODO: Add more temporal features (e.g., time since reference_time)
 
-    return np.array([created_at], dtype=np.float32)
+def compute_replies_count(
+    edges: List[tuple[str, str]]
+) -> Dict[str, int]:
+    """
+    Compute the number of replies received by each tweet.
+    
+    Args:
+        edges: List of (parent_id, child_id) reply edges
+        
+    Returns:
+        Dictionary of tweet_id -> number of replies received
+    """
+    replies_count = {}
+    for parent_id, child_id in edges:
+        replies_count[parent_id] = replies_count.get(parent_id, 0) + 1
+    return replies_count
 
 
 def compute_temporal_positions(
@@ -287,7 +476,11 @@ def create_temporal_positional_encoding(
     d_model: int = 16
 ) -> np.ndarray:
     """
-    Create positional encoding for a temporal position.
+    Create sinusoidal positional encoding for a temporal position.
+    
+    Uses the same approach as Transformer positional encodings:
+    PE(pos, 2i) = sin(pos / 10000^(2i/d_model))
+    PE(pos, 2i+1) = cos(pos / 10000^(2i/d_model))
 
     Args:
         position: Temporal position (0, 1, 2, ...)
@@ -296,10 +489,18 @@ def create_temporal_positional_encoding(
     Returns:
         Positional encoding vector [d_model dimensions]
     """
-    # TODO: Add encoding logic (e.g., sinusoidal)
-    encoding = np.zeros(d_model)
-
-    return encoding.astype(np.float32)
+    encoding = np.zeros(d_model, dtype=np.float32)
+    
+    for i in range(0, d_model, 2):
+        # Calculate the divisor for this dimension
+        div_term = 10000 ** (i / d_model)
+        # Even indices: sin
+        encoding[i] = np.sin(position / div_term)
+        # Odd indices: cos (if not the last element)
+        if i + 1 < d_model:
+            encoding[i + 1] = np.cos(position / div_term)
+    
+    return encoding
 
 
 # ============================================================================
@@ -321,12 +522,21 @@ def extract_all_tweet_features(
         reference_time: Reference time for temporal features
         include_temporal_encoding: Whether to include positional encoding
         temporal_encoding_dim: Dimension of temporal encoding
-        edges: Reply edges for computing temporal positions
+        edges: Reply edges for computing temporal positions and reply counts
 
     Returns:
         Tuple of (features_dict, total_feature_dim)
     """
     features_dict = {}
+
+    # Compute replies count for each tweet
+    replies_count_dict = {}
+    if edges:
+        replies_count_dict = compute_replies_count(edges)
+        # Initialize all tweets with 0 replies if not in dict
+        for tweet_id in tweets.keys():
+            if tweet_id not in replies_count_dict:
+                replies_count_dict[tweet_id] = 0
 
     # Compute temporal positions if needed
     positions = None
@@ -334,15 +544,22 @@ def extract_all_tweet_features(
         positions = compute_temporal_positions(tweets, edges)
 
     for tweet_id, tweet in tweets.items():
-        # Base features
-        base_features = extract_tweet_features(tweet)
+        # Get replies count for this tweet
+        replies_count = replies_count_dict.get(tweet_id, 0)
+        
+        # Base features (16: 6 text + 4 entity + 3 engagement + 3 metadata)
+        base_features = extract_tweet_features(tweet, replies_count=replies_count)
+        # Temporal features (6)
         temporal = extract_temporal_features(tweet, reference_time)
 
         feature_parts = [base_features, temporal]
 
-        # Add temporal positional encoding
-        if include_temporal_encoding and positions:
-            position = positions.get(tweet_id, 0)
+        # Add temporal positional encoding (16)
+        if include_temporal_encoding:
+            if positions:
+                position = positions.get(tweet_id, 0)
+            else:
+                position = 0
             encoding = create_temporal_positional_encoding(
                 position, temporal_encoding_dim
             )

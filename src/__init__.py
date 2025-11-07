@@ -26,15 +26,24 @@ from .parsers import (
     ParseError,
 )
 
-from .graph_builder import (
-    PHEMEGraphBuilder,
-    thread_to_graph,
-    print_graph_statistics,
-)
-
-from .pyg_dataset import (
-    PHEMEDataset,
-)
+# Optional imports for graph building (requires torch_geometric)
+try:
+    from .graph_builder import (
+        PHEMEGraphBuilder,
+        thread_to_graph,
+        print_graph_statistics,
+    )
+    from .pyg_dataset import (
+        PHEMEDataset,
+    )
+    _HAS_PYG = True
+except ImportError:
+    _HAS_PYG = False
+    # Define placeholders to avoid NameError
+    PHEMEGraphBuilder = None
+    thread_to_graph = None
+    print_graph_statistics = None
+    PHEMEDataset = None
 
 __all__ = [
     # Models
@@ -54,10 +63,13 @@ __all__ = [
     "find_all_threads",
     "verify_thread",
     "ParseError",
-    # Graph Builder
-    "PHEMEGraphBuilder",
-    "thread_to_graph",
-    "print_graph_statistics",
-    # PyG Dataset
-    "PHEMEDataset",
 ]
+
+# Add graph builder exports only if available
+if _HAS_PYG:
+    __all__.extend([
+        "PHEMEGraphBuilder",
+        "thread_to_graph",
+        "print_graph_statistics",
+        "PHEMEDataset",
+    ])

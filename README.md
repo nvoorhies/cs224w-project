@@ -165,8 +165,8 @@ print(graph)
 The heterogeneous graph includes:
 
 **Node Types:**
-- `tweet`: Tweet nodes with 35 features (15 base + 4 temporal + 16 positional encoding)
-- `user`: User nodes with 13 features
+- `tweet`: Tweet nodes with 38 features (16 base + 6 temporal + 16 positional encoding)
+- `user`: User nodes with 21 features
 
 **Edge Types:**
 - `(tweet, replies_to, tweet)`: Reply relationships
@@ -178,18 +178,21 @@ The heterogeneous graph includes:
 
 ### Features
 
-**Tweet Features (35 dimensions):**
-- Text features (6): length, word count, uppercase ratio, punctuation
+**Tweet Features (38 dimensions):**
+- Text features (6): length, word count, uppercase ratio, punctuation ratio, has exclamation, has question
 - Entity features (4): hashtags, URLs, mentions, symbols
-- Engagement features (2): log retweet count, log favorite count
+- Engagement features (3): log retweet count, log favorite count, log replies count
 - Metadata (3): is retweet, is truncated, is reply
-- Temporal (4): hour, day of week, timestamp, time since thread start
-- Positional encoding (16): sinusoidal encoding based on position in thread
+- Temporal (6): hour (sin/cos), day of week (sin/cos), time since thread start, normalized timestamp
+- Positional encoding (16): sinusoidal encoding based on position in thread (Transformer-style)
 
-**User Features (13 dimensions):**
+**User Features (21 dimensions):**
 - Profile (7): log followers, log friends, log statuses, log listed, log favorites, verified, protected
 - Activity (3): friends/followers ratio, tweets per follower, favorites per tweet
 - Metadata (3): geo enabled, default profile, default image
+- Timezone (2): has timezone, normalized UTC offset
+- Description (4): length, word count, has description, has URL
+- Profile age (2): log account age in days, account age in years
 
 ### User-User Edges
 
@@ -235,8 +238,8 @@ loader = DataLoader(train, batch_size=32, shuffle=True)
 
 for batch in loader:
     # batch is a batched HeteroData object
-    print(batch['tweet'].x.shape)  # [num_tweets_in_batch, 35]
-    print(batch['user'].x.shape)   # [num_users_in_batch, 13]
+    print(batch['tweet'].x.shape)  # [num_tweets_in_batch, 38]
+    print(batch['user'].x.shape)   # [num_users_in_batch, 21]
 ```
 
 ### Labels
