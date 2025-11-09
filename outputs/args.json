@@ -1,6 +1,6 @@
 {
   "data_root": "data/all-rnr-annotated-threads",
-  "max_threads": null,
+  "max_threads": 100,
   "train_ratio": 0.7,
   "val_ratio": 0.15,
   "test_ratio": 0.15,
@@ -14,7 +14,7 @@
   "dropout": 0.5,
   "link_pred_hidden_dim": 64,
   "batch_size": 1,
-  "epochs": 100,
+  "epochs": 1,
   "lr": 0.001,
   "weight_decay": 0.0005,
   "patience": 10,
