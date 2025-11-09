@@ -225,9 +225,20 @@ def extract_temporal_features(
     """
     created_at = parse_twitter_timestamp(tweet.created_at)
 
-    #TODO: Add more temporal features (e.g., time since reference_time)
+    # Temporal context
+    hour_of_day = created_at.hour / 23.0  # Normalize to [0, 1]
+    day_of_week = created_at.weekday() / 6.0  # Normalize to [0, 1]
+    unix_minutes = created_at.timestamp() / 60_000_000.0  # Scale to keep float32 stable
 
-    return np.array([created_at], dtype=np.float32)
+    if reference_time:
+        delta_minutes = (created_at - reference_time).total_seconds() / 60.0
+    else:
+        delta_minutes = 0.0
+
+    return np.array(
+        [hour_of_day, day_of_week, unix_minutes, delta_minutes],
+        dtype=np.float32
+    )
 
 
 def compute_temporal_positions(
@@ -332,6 +343,9 @@ def extract_all_tweet_features(
     positions = None
     if include_temporal_encoding and edges:
         positions = compute_temporal_positions(tweets, edges)
+    elif include_temporal_encoding:
+        # Fallback: assign position 0 when no edges are present
+        positions = {tweet_id: 0 for tweet_id in tweets.keys()}
 
     for tweet_id, tweet in tweets.items():
         # Base features

@@ -36,6 +36,20 @@ from .pyg_dataset import (
     PHEMEDataset,
 )
 
+from .link_prediction_dataset import (
+    LinkPredictionDataset,
+    create_story_split_datasets,
+    split_stories,
+    ALL_STORIES,
+)
+
+from .het_gat_model import (
+    HeteroGATLayer,
+    TemporalHeteroGAT,
+    LinkPredictor,
+    HeteroGATLinkPrediction,
+)
+
 __all__ = [
     # Models
     "Annotation",
@@ -60,4 +74,14 @@ __all__ = [
     "print_graph_statistics",
     # PyG Dataset
     "PHEMEDataset",
+    # Link Prediction Dataset
+    "LinkPredictionDataset",
+    "create_story_split_datasets",
+    "split_stories",
+    "ALL_STORIES",
+    # Heterogeneous GAT Model
+    "HeteroGATLayer",
+    "TemporalHeteroGAT",
+    "LinkPredictor",
+    "HeteroGATLinkPrediction",
 ]

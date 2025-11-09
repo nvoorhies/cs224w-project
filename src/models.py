@@ -261,11 +261,38 @@ class AnnotationLink(BaseModel):
 class Annotation(BaseModel):
     """Annotation metadata for a tweet thread."""
     is_rumour: str  # "rumour", "non-rumour", "unverified"
-    category: str  # Description/category of the rumour
+    category: Optional[str] = None  # Description/category of the rumour
     misinformation: int = 0  # 0 or 1 (coerced from int or string in data)
     true: int = 0  # 0 or 1 (coerced from int or string in data)
     is_turnaround: int = 0  # 0 or 1
     links: List[AnnotationLink] = Field(default_factory=list)
+
+    @field_validator('is_rumour', mode='before')
+    @classmethod
+    def normalize_is_rumour(cls, v: Any) -> str:
+        """Normalize rumour label variations found in the dataset."""
+        if v is None:
+            return "unverified"
+        if isinstance(v, bool):
+            return "rumour" if v else "non-rumour"
+        if isinstance(v, (int, float)):
+            return "rumour" if v else "non-rumour"
+
+        text = str(v).strip().lower()
+        # Remove delimiters for easier matching
+        normalized = text.replace("_", "").replace("-", "")
+
+        mapping = {
+            "rumour": "rumour",
+            "rumor": "rumour",
+            "nonrumour": "non-rumour",
+            "nonrumor": "non-rumour",
+            "notrumour": "non-rumour",
+            "notrumor": "non-rumour",
+            "unverified": "unverified",
+        }
+
+        return mapping.get(normalized, text)
 
     @field_validator('misinformation', 'true', mode='before')
     @classmethod
