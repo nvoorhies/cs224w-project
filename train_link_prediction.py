@@ -1,8 +1,8 @@
 """
 Training script for link prediction on PHEME dataset.
 
-Trains a Heterogeneous GAT model to predict "follow request" links
-between users in tweet threads.
+Trains a Heterogeneous GAT model to predict "follow_request_sent" links
+from tweets to users in rumour-centric threads.
 """
 
 import argparse

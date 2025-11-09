@@ -147,7 +147,7 @@ class LinkPredictionDataset(PHEMEDataset):
         # Get the base graph
         graph = super().get(idx)
         
-        # Generate positive and negative samples for link prediction
+        # Generate positive and negative samples for tweet->user link prediction
         edge_label_index, edge_label = self._generate_link_samples(graph)
         
         # Add to graph
@@ -163,8 +163,11 @@ class LinkPredictionDataset(PHEMEDataset):
         """
         Generate positive and negative samples for link prediction.
         
-        For "follow request" prediction, we use existing user-user interactions
-        as positive samples and randomly sample negative pairs.
+        For "follow request" prediction, we use tweet->user edges that represent
+        a reply-driven engagement (tweet replying to another user's tweet).
+        These come from the `('tweet', 'follow_request_sent', 'user')` relation
+        constructed by the graph builder. We then randomly sample negative
+        tweet->user pairs that are not observed.
         
         Args:
             graph: HeteroData graph
@@ -174,29 +177,17 @@ class LinkPredictionDataset(PHEMEDataset):
             - edge_label_index: [2, num_edges] tensor of edge indices
             - edge_label: [num_edges] tensor of labels (1 for positive, 0 for negative)
         """
+        num_tweets = graph['tweet'].x.shape[0]
         num_users = graph['user'].x.shape[0]
         
-        # Get positive samples (existing user-user edges)
-        positive_edges = []
-        if ('user', 'interacts_with', 'user') in graph.edge_types:
-            pos_edge_index = graph[('user', 'interacts_with', 'user')].edge_index
-            if pos_edge_index.shape[1] > 0:
-                positive_edges.append(pos_edge_index)
-        
-        if ('user', 'interacted_by', 'user') in graph.edge_types:
-            pos_edge_index = graph[('user', 'interacted_by', 'user')].edge_index
-            if pos_edge_index.shape[1] > 0:
-                # Reverse the edges to get (src, dst) format
-                positive_edges.append(pos_edge_index.flip(0))
-        
-        # Combine all positive edges
-        if positive_edges:
-            all_positive = torch.cat(positive_edges, dim=1)
-            # Remove duplicates
-            all_positive = torch.unique(all_positive, dim=1)
+        # Get positive samples (existing tweet->user follow edges)
+        if ('tweet', 'follow_request_sent', 'user') in graph.edge_types:
+            all_positive = graph[('tweet', 'follow_request_sent', 'user')].edge_index
         else:
-            # If no existing edges, create positive samples based on tweet interactions
-            # Users who interact in the same thread are likely to have follow requests
+            all_positive = torch.zeros((2, 0), dtype=torch.long)
+        
+        if all_positive.numel() == 0:
+            # Fallback: derive positives from reply structure
             all_positive = self._generate_positive_from_tweets(graph)
         
         num_positive = all_positive.shape[1]
@@ -205,6 +196,11 @@ class LinkPredictionDataset(PHEMEDataset):
         negative_edges = self._generate_negative_samples(
             graph, num_positive * self.num_negative_samples
         )
+        if negative_edges.shape[1] == 0 and num_positive > 0:
+            # Ensure at least some negatives exist
+            negative_edges = self._generate_negative_samples(
+                graph, max(num_positive, 10)
+            )
         
         # Combine positive and negative samples
         edge_label_index = torch.cat([all_positive, negative_edges], dim=1)
@@ -224,71 +220,49 @@ class LinkPredictionDataset(PHEMEDataset):
         """
         Generate positive samples from tweet interactions.
         
-        If two users have tweets in the same thread and one replies to the other,
-        we consider this as a potential follow request.
+        If a tweet replies to another tweet, we link the replying tweet to the
+        parent tweet's author as a proxy for a follow request.
         
         Args:
             graph: HeteroData graph
             
         Returns:
-            Edge index tensor [2, num_positive_edges]
+            Edge index tensor [2, num_positive_edges] (tweet_idx, user_idx)
         """
-        # Get user-tweet authorship edges
-        if ('user', 'posts', 'tweet') not in graph.edge_types:
+        if (
+            ('tweet', 'replies_to', 'tweet') not in graph.edge_types
+            or ('user', 'posts', 'tweet') not in graph.edge_types
+        ):
             return torch.zeros((2, 0), dtype=torch.long)
         
-        user_tweet_edges = graph[('user', 'posts', 'tweet')].edge_index
-        num_users = graph['user'].x.shape[0]
-        num_tweets = graph['tweet'].x.shape[0]
+        reply_edges = graph[('tweet', 'replies_to', 'tweet')].edge_index
+        authorship = graph[('user', 'posts', 'tweet')].edge_index
         
-        # Build user -> tweets mapping
-        user_tweets = {}
-        for i in range(user_tweet_edges.shape[1]):
-            user_idx = user_tweet_edges[0, i].item()
-            tweet_idx = user_tweet_edges[1, i].item()
-            if user_idx not in user_tweets:
-                user_tweets[user_idx] = []
-            user_tweets[user_idx].append(tweet_idx)
+        tweet_to_author = {}
+        for i in range(authorship.shape[1]):
+            user_idx = authorship[0, i].item()
+            tweet_idx = authorship[1, i].item()
+            tweet_to_author[tweet_idx] = user_idx
         
-        # Get reply edges
         positive_pairs = set()
-        if ('tweet', 'replies_to', 'tweet') in graph.edge_types:
-            reply_edges = graph[('tweet', 'replies_to', 'tweet')].edge_index
+        for i in range(reply_edges.shape[1]):
+            parent_tweet = reply_edges[0, i].item()
+            child_tweet = reply_edges[1, i].item()
             
-            # Build tweet -> author mapping
-            tweet_author = {}
-            for i in range(user_tweet_edges.shape[1]):
-                user_idx = user_tweet_edges[0, i].item()
-                tweet_idx = user_tweet_edges[1, i].item()
-                tweet_author[tweet_idx] = user_idx
-            
-            # For each reply edge, create a user-user edge
-            for i in range(reply_edges.shape[1]):
-                parent_tweet = reply_edges[0, i].item()
-                child_tweet = reply_edges[1, i].item()
+            if (
+                parent_tweet in tweet_to_author
+                and child_tweet in tweet_to_author
+            ):
+                parent_user = tweet_to_author[parent_tweet]
+                child_tweet_idx = child_tweet
                 
-                if parent_tweet in tweet_author and child_tweet in tweet_author:
-                    parent_user = tweet_author[parent_tweet]
-                    child_user = tweet_author[child_tweet]
-                    
-                    if parent_user != child_user:
-                        # Child user replies to parent user -> potential follow request
-                        positive_pairs.add((child_user, parent_user))
+                positive_pairs.add((child_tweet_idx, parent_user))
         
         if not positive_pairs:
-            # Fallback: create edges between users who have tweets in the thread
-            users_with_tweets = list(user_tweets.keys())
-            if len(users_with_tweets) >= 2:
-                # Create edges between all pairs (sparse)
-                for i, u1 in enumerate(users_with_tweets):
-                    for u2 in users_with_tweets[i+1:min(i+3, len(users_with_tweets))]:
-                        positive_pairs.add((u1, u2))
-        
-        if positive_pairs:
-            edges = list(positive_pairs)
-            return torch.tensor(edges, dtype=torch.long).t().contiguous()
-        else:
             return torch.zeros((2, 0), dtype=torch.long)
+        
+        edges = list(positive_pairs)
+        return torch.tensor(edges, dtype=torch.long).t().contiguous()
     
     def _generate_negative_samples(
         self,
@@ -305,22 +279,18 @@ class LinkPredictionDataset(PHEMEDataset):
         Returns:
             Edge index tensor [2, num_negative]
         """
+        num_tweets = graph['tweet'].x.shape[0]
         num_users = graph['user'].x.shape[0]
         
-        if num_users < 2:
+        if num_tweets == 0 or num_users == 0 or num_negative == 0:
             return torch.zeros((2, 0), dtype=torch.long)
         
-        # Get all existing edges to avoid sampling them
+        # Get all existing tweet->user edges to avoid sampling them
         existing_edges = set()
-        if ('user', 'interacts_with', 'user') in graph.edge_types:
-            edges = graph[('user', 'interacts_with', 'user')].edge_index
+        if ('tweet', 'follow_request_sent', 'user') in graph.edge_types:
+            edges = graph[('tweet', 'follow_request_sent', 'user')].edge_index
             for i in range(edges.shape[1]):
                 existing_edges.add((edges[0, i].item(), edges[1, i].item()))
-        
-        if ('user', 'interacted_by', 'user') in graph.edge_types:
-            edges = graph[('user', 'interacted_by', 'user')].edge_index
-            for i in range(edges.shape[1]):
-                existing_edges.add((edges[1, i].item(), edges[0, i].item()))
         
         # Sample negative edges
         negative_edges = []
@@ -330,11 +300,12 @@ class LinkPredictionDataset(PHEMEDataset):
         random.seed(self.seed + hash(graph.thread_id) if hasattr(graph, 'thread_id') else self.seed)
         
         while len(negative_edges) < num_negative and attempts < max_attempts:
-            u1 = random.randint(0, num_users - 1)
-            u2 = random.randint(0, num_users - 1)
+            tweet_idx = random.randint(0, num_tweets - 1)
+            user_idx = random.randint(0, num_users - 1)
             
-            if u1 != u2 and (u1, u2) not in existing_edges:
-                negative_edges.append([u1, u2])
+            if (tweet_idx, user_idx) not in existing_edges:
+                negative_edges.append([tweet_idx, user_idx])
+                existing_edges.add((tweet_idx, user_idx))
             
             attempts += 1
         

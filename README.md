@@ -2,7 +2,7 @@
 
 Social networks have emerged as a transformative force for public opinion, from polarising politics [1] to instigating genocide [2]. Existing veracity mechanisms focus on rumour detection [3] but neglect structural analyses of how misinformation diffuses through communities.  
 
-This project analyses how rumours build communities using a Graph Transformer model for temporal heterogeneous networks. We frame the task as edge-level link prediction: given a rumour-centric thread, predict whether a tweet interaction will create a follow-like relationship between the participating users. Our architecture couples a heterogeneous Graph Attention Network encoder (two `HeteroConv` + `GATConv` layers over tweet↔tweet, user↔tweet, and user↔user relations) with a learned MLP link predictor. Temporal context, structural positions, and user metadata are jointly encoded, allowing the model to reason about both information flow and community formation.
+This project analyses how rumours build communities using a Graph Transformer model for temporal heterogeneous networks. We frame the task as edge-level link prediction: given a rumour-centric thread, predict whether a tweet interaction will create a `follow_request_sent` link from the reply tweet to the target user. Our architecture couples a heterogeneous Graph Attention Network encoder (two `HeteroConv` + `GATConv` layers over tweet↔tweet, user↔tweet, tweet→user follow request, and user↔user relations) with a learned MLP link predictor. Temporal context, structural positions, and user metadata are jointly encoded, allowing the model to reason about both information flow and community formation.
 
 # PHEME Dataset Parser & Link Prediction Pipeline
 
@@ -150,12 +150,12 @@ Outputs are written to `outputs/` (`args.json`, `best_model.pt`, `results.json`)
 
 ### Latest Accuracy Metrics
 
-100-epoch training run on the full dataset (batch size = 1, hidden = 64, heads = 2). Best checkpoint observed at epoch 28:
+10-epoch training run on the full dataset (batch size = 1, hidden = 64, heads = 2). Best checkpoint observed at epoch 10:
 
 | Split       | Loss  | Accuracy | AUC-ROC | AUC-PR |
 |-------------|-------|----------|---------|--------|
-| Validation* | 0.0387 | 0.979 | 0.997 | 0.997 |
-| Test        | 0.0644 | 0.964 | 0.994 | 0.993 |
+| Validation* | 0.0342 | 0.978 | 0.996 | 0.996 |
+| Test        | 0.0499 | 0.962 | 0.990 | 0.988 |
 
 \*Best-validation checkpoint is used for the reported test metrics.
 
@@ -212,7 +212,7 @@ Resume your training loop from `start_epoch`. If you frequently reuse checkpoint
 
 ## Model Architecture & Design Choices
 
-- **Encoder:** Two-layer heterogeneous Graph Attention Network (`HeteroConv` with `GATConv`) covering six edge relations (tweet↔tweet, user↔tweet, user↔user).
+- **Encoder:** Two-layer heterogeneous Graph Attention Network (`HeteroConv` with `GATConv`) covering eight edge relations (tweet↔tweet, user↔tweet, tweet→user follow request, user→tweet follow receipt, user↔user).
 - **Hidden dimensions:** 64 hidden channels with 2 attention heads per layer (concatenated); ReLU activations and dropout between layers.
 - **Link predictor:** Multi-layer perceptron (`64 → 32 → 1`) applied to concatenated user embeddings; dropout (0.5) for regularisation.
 - **Feature design:**

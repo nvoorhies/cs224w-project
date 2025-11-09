@@ -73,6 +73,14 @@ class HeteroGATLayer(nn.Module):
                 (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout,
                 negative_slope=negative_slope, add_self_loops=False
             )
+            conv_dict[('tweet', 'follow_request_sent', 'user')] = GATConv(
+                (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout,
+                negative_slope=negative_slope, add_self_loops=False
+            )
+            conv_dict[('user', 'follow_request_received', 'tweet')] = GATConv(
+                (user_dim, tweet_dim), out_channels, heads=heads, dropout=dropout,
+                negative_slope=negative_slope, add_self_loops=False
+            )
         
         # User -> User edges (homogeneous)
         if 'user' in in_channels_dict:
@@ -126,7 +134,7 @@ class TemporalHeteroGAT(nn.Module):
     Temporal Heterogeneous Graph Attention Transformer for link prediction.
     
     This model processes heterogeneous graphs with temporal information
-    to predict links (e.g., follow requests) between users.
+    to predict links (e.g., follow requests) between tweets and users.
     """
     
     def __init__(
@@ -249,7 +257,7 @@ class LinkPredictor(nn.Module):
     Link prediction head for predicting follow requests.
     
     Takes node embeddings and predicts the probability of a link
-    between two nodes (e.g., user A will follow user B).
+    between a tweet and a user (e.g., a reply tweet triggers a follow request).
     """
     
     def __init__(
@@ -306,7 +314,7 @@ class LinkPredictor(nn.Module):
 
 class HeteroGATLinkPrediction(nn.Module):
     """
-    Complete model for link prediction on heterogeneous graphs.
+    Complete model for tweet-to-user link prediction on heterogeneous graphs.
     
     Combines TemporalHeteroGAT for node embeddings and LinkPredictor
     for link prediction.
@@ -349,7 +357,7 @@ class HeteroGATLinkPrediction(nn.Module):
             negative_slope=negative_slope,
         )
         
-        # Link predictor (for user-user links)
+        # Link predictor for tweet->user links
         self.link_predictor = LinkPredictor(
             node_emb_dim=out_channels,
             hidden_dim=link_pred_hidden_dim,
@@ -382,14 +390,12 @@ class HeteroGATLinkPrediction(nn.Module):
         # Predict links if edge_label_index is provided
         link_pred = None
         if edge_label_index is not None:
-            # Extract user embeddings for link prediction
-            user_emb = node_emb_dict['user']  # [num_users, out_channels]
+            tweet_emb = node_emb_dict['tweet']
+            user_emb = node_emb_dict['user']
             
-            # Get source and destination embeddings
-            src_emb = user_emb[edge_label_index[0]]  # [num_edges, out_channels]
-            dst_emb = user_emb[edge_label_index[1]]  # [num_edges, out_channels]
+            src_emb = tweet_emb[edge_label_index[0]]
+            dst_emb = user_emb[edge_label_index[1]]
             
-            # Predict links
             link_pred = self.link_predictor(src_emb, dst_emb)
         
         return node_emb_dict, link_pred
