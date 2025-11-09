@@ -155,6 +155,55 @@ Outputs are written to `outputs/` (`args.json`, `best_model.pt`, `results.json`)
 
 For quick smoke tests, you can still run a single epoch with `--max-threads 100`; expect materially lower scores.
 
+### Resuming from Checkpoints
+
+The training script saves `outputs/best_model.pt` containing:
+
+```python
+{
+    "epoch": int,
+    "model_state_dict": ...,
+    "optimizer_state_dict": ...,
+    "val_loss": float,
+    "val_metrics": dict,
+}
+```
+
+To resume (or run inference), recreate the model with the same hyperparameters, then load the state:
+
+```python
+import torch
+from pathlib import Path
+from src.het_gat_model import HeteroGATLinkPrediction
+
+in_channels_dict = {"tweet": 30, "user": 13}
+model = HeteroGATLinkPrediction(
+    in_channels_dict=in_channels_dict,
+    hidden_channels=64,
+    out_channels=32,
+    num_layers=2,
+    heads=2,
+    dropout=0.5,
+    link_pred_hidden_dim=64,
+)
+
+checkpoint = torch.load(Path("outputs/best_model.pt"), weights_only=False)
+model.load_state_dict(checkpoint["model_state_dict"])
+model.eval()
+```
+
+For continued training, also restore the optimiser and optional scheduler:
+
+```python
+from torch.optim import Adam
+
+optimizer = Adam(model.parameters(), lr=0.001, weight_decay=5e-4)
+optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+start_epoch = checkpoint["epoch"] + 1
+```
+
+Resume your training loop from `start_epoch`. If you frequently reuse checkpoints, you can add a small CLI flag that wraps these calls before the main loop.
+
 ## Model Architecture & Design Choices
 
 - **Encoder:** Two-layer heterogeneous Graph Attention Network (`HeteroConv` with `GATConv`) covering six edge relations (tweet↔tweet, user↔tweet, user↔user).
