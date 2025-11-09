@@ -1,3 +1,9 @@
+# Abstract
+
+Social networks have emerged as a transformative force for public opinion, from polarising politics [1] to instigating genocide [2]. Existing veracity mechanisms focus on rumour detection [3] but neglect structural analyses of how misinformation diffuses through communities.  
+
+This project analyses how rumours build communities using a Graph Transformer model for temporal heterogeneous networks. We frame the task as edge-level link prediction: given a rumour-centric thread, predict whether a tweet interaction will create a follow-like relationship between the participating users. Our architecture couples a heterogeneous Graph Attention Network encoder (two `HeteroConv` + `GATConv` layers over tweet↔tweet, user↔tweet, and user↔user relations) with a learned MLP link predictor. Temporal context, structural positions, and user metadata are jointly encoded, allowing the model to reason about both information flow and community formation.
+
 # PHEME Dataset Parser & Link Prediction Pipeline
 
 A robust, Pydantic-based parser for the annotated PHEME dataset, complete with utilities to build PyTorch Geometric (PyG) heterogeneous graphs and a full link-prediction training pipeline.
