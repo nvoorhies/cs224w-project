@@ -205,6 +205,54 @@ def build_reply_based_user_edges(
     return torch.tensor(edges, dtype=torch.long).t().contiguous()
 
 
+def build_follow_request_edges(
+    tweets: Dict[str, Tweet],
+    structure_edges: List[tuple[str, str]],
+    tweet_id_to_idx: Dict[str, int],
+    user_id_to_idx: Dict[int, int]
+) -> torch.Tensor:
+    """
+    Build tweet->user edges representing potential follow requests.
+
+    When a reply is made, the replying tweet is connected to the user it
+    responded to, modelling the hypothesis that engagement can trigger a
+    follow request.
+
+    Args:
+        tweets: Dictionary of tweet_id -> Tweet
+        structure_edges: List of (parent_tweet_id, child_tweet_id)
+        tweet_id_to_idx: Mapping from tweet_id to node index
+        user_id_to_idx: Mapping from user_id to node index
+
+    Returns:
+        Edge index tensor [2, num_edges] (tweet_idx, user_idx)
+    """
+    edges = []
+
+    for parent_tweet_id, child_tweet_id in structure_edges:
+        if parent_tweet_id not in tweets or child_tweet_id not in tweets:
+            continue
+
+        parent_tweet = tweets[parent_tweet_id]
+        child_tweet = tweets[child_tweet_id]
+
+        parent_user_id = parent_tweet.user.id
+
+        if (
+            child_tweet_id in tweet_id_to_idx
+            and parent_user_id in user_id_to_idx
+        ):
+            tweet_idx = tweet_id_to_idx[child_tweet_id]
+            user_idx = user_id_to_idx[parent_user_id]
+            edges.append([tweet_idx, user_idx])
+
+    if not edges:
+        return torch.zeros((2, 0), dtype=torch.long)
+
+    edges = list(set(tuple(e) for e in edges))
+    return torch.tensor(edges, dtype=torch.long).t().contiguous()
+
+
 # ============================================================================
 # Graph Construction
 # ============================================================================
@@ -325,6 +373,15 @@ class PHEMEGraphBuilder:
             all_tweets, tweet_id_to_idx, user_id_to_idx
         )
         data['tweet', 'posted_by', 'user'].edge_index = tweet_to_author_edge_index
+
+        # 3b. Tweet -> User follow request hypothesis edges
+        follow_request_edge_index = build_follow_request_edges(
+            all_tweets, structure_edges, tweet_id_to_idx, user_id_to_idx
+        )
+        data['tweet', 'follow_request_sent', 'user'].edge_index = follow_request_edge_index
+
+        if add_reverse_edges:
+            data['user', 'follow_request_received', 'tweet'].edge_index = follow_request_edge_index.flip(0)
 
         # 4. User -> User (based on selected strategy)
         if self.user_edge_type != "none":
