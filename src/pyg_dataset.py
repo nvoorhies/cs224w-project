@@ -218,12 +218,28 @@ class PHEMEDataset(Dataset):
 
     def _encode_rumour_type(self, rumour_type: str) -> int:
         """Encode rumour type as integer label."""
+        if rumour_type is None:
+            return 2
+
+        key = rumour_type.strip().lower()
+        mapping = {
+            "rumour": "rumour",
+            "rumor": "rumour",
+            "non-rumour": "non-rumour",
+            "nonrumour": "non-rumour",
+            "non-rumor": "non-rumour",
+            "nonrumor": "non-rumour",
+            "unverified": "unverified",
+        }
+
+        normalized = mapping.get(key, rumour_type)
+
         encoding = {
             "rumour": 0,
             "non-rumour": 1,
             "unverified": 2
         }
-        return encoding.get(rumour_type, 2)
+        return encoding.get(normalized, 2)
 
     def get_split_datasets(
         self
