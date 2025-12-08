@@ -163,11 +163,11 @@ class LinkPredictionDataset(PHEMEDataset):
         """
         Generate positive and negative samples for link prediction.
         
-        For "follow request" prediction, we use tweet->user edges that represent
-        a reply-driven engagement (tweet replying to another user's tweet).
-        These come from the `('tweet', 'follow_request_sent', 'user')` relation
-        constructed by the graph builder. We then randomly sample negative
-        tweet->user pairs that are not observed.
+        For "user reply" prediction, we use user->tweet edges that represent
+        a reply-driven engagement (user replying to another user's tweet).
+        We construct the positive samples from interactions using `('user', 'posts', 'tweet')` 
+        and `('tweet', 'replies', 'tweet')` relation constructed by the graph builder. 
+        We then randomly sample negative user->tweet pairs that are not observed.
         
         Args:
             graph: HeteroData graph
@@ -180,26 +180,19 @@ class LinkPredictionDataset(PHEMEDataset):
         num_tweets = graph['tweet'].x.shape[0]
         num_users = graph['user'].x.shape[0]
         
-        # Get positive samples (existing tweet->user follow edges)
-        if ('tweet', 'follow_request_sent', 'user') in graph.edge_types:
-            all_positive = graph[('tweet', 'follow_request_sent', 'user')].edge_index
-        else:
-            all_positive = torch.zeros((2, 0), dtype=torch.long)
-        
-        if all_positive.numel() == 0:
-            # Fallback: derive positives from reply structure
-            all_positive = self._generate_positive_from_tweets(graph)
+        # Get positive samples (user->tweet reply edges)
+        all_positive = self._generate_positive_from_tweets(graph)
         
         num_positive = all_positive.shape[1]
         
         # Generate negative samples
         negative_edges = self._generate_negative_samples(
-            graph, num_positive * self.num_negative_samples
+            graph, num_positive * self.num_negative_samples, all_positive
         )
         if negative_edges.shape[1] == 0 and num_positive > 0:
             # Ensure at least some negatives exist
             negative_edges = self._generate_negative_samples(
-                graph, max(num_positive, 10)
+                graph, max(num_positive, 10), all_positive
             )
         
         # Combine positive and negative samples
@@ -220,14 +213,14 @@ class LinkPredictionDataset(PHEMEDataset):
         """
         Generate positive samples from tweet interactions.
         
-        If a tweet replies to another tweet, we link the replying tweet to the
-        parent tweet's author as a proxy for a follow request.
+        If a tweet replies to another tweet, we link the replying tweet's author to the
+        parent tweet.
         
         Args:
             graph: HeteroData graph
             
         Returns:
-            Edge index tensor [2, num_positive_edges] (tweet_idx, user_idx)
+            Edge index tensor [2, num_positive_edges] (user_idx, tweet_idx)
         """
         if (
             ('tweet', 'replies_to', 'tweet') not in graph.edge_types
@@ -253,10 +246,10 @@ class LinkPredictionDataset(PHEMEDataset):
                 parent_tweet in tweet_to_author
                 and child_tweet in tweet_to_author
             ):
-                parent_user = tweet_to_author[parent_tweet]
-                child_tweet_idx = child_tweet
+                child_author = tweet_to_author[child_tweet]
+                parent_tweet_idx = parent_tweet
                 
-                positive_pairs.add((child_tweet_idx, parent_user))
+                positive_pairs.add((child_author, parent_tweet_idx))
         
         if not positive_pairs:
             return torch.zeros((2, 0), dtype=torch.long)
@@ -267,7 +260,8 @@ class LinkPredictionDataset(PHEMEDataset):
     def _generate_negative_samples(
         self,
         graph: HeteroData,
-        num_negative: int
+        num_negative: int,
+        positive_edges: torch.Tensor,
     ) -> torch.Tensor:
         """
         Generate negative samples (non-edges) for link prediction.
@@ -275,22 +269,26 @@ class LinkPredictionDataset(PHEMEDataset):
         Args:
             graph: HeteroData graph
             num_negative: Number of negative samples to generate
+            positive_edges: positive samples index tensor [2, num_positive_edges] (user_idx, tweet_idx)
             
         Returns:
             Edge index tensor [2, num_negative]
         """
+        # TODO: negative samples should exlude any reply edges that exist in the original graph, despite the edge being the first reply after t or not.
+        # take the median time of each thread  as the cutoff, so 50% interactions in that thread  for base graph
         num_tweets = graph['tweet'].x.shape[0]
         num_users = graph['user'].x.shape[0]
         
         if num_tweets == 0 or num_users == 0 or num_negative == 0:
             return torch.zeros((2, 0), dtype=torch.long)
         
-        # Get all existing tweet->user edges to avoid sampling them
+        # Get all existing user-tweet edges to avoid sampling them
         existing_edges = set()
-        if ('tweet', 'follow_request_sent', 'user') in graph.edge_types:
-            edges = graph[('tweet', 'follow_request_sent', 'user')].edge_index
-            for i in range(edges.shape[1]):
-                existing_edges.add((edges[0, i].item(), edges[1, i].item()))
+        edges = graph[('user', 'posts', 'tweet')].edge_index
+        for i in range(edges.shape[1]):
+            existing_edges.add((edges[0, i].item(), edges[1, i].item()))
+        for i in range(positive_edges.shape[1]):
+            existing_edges.add((positive_edges[0, i].item(), positive_edges[1, i].item()))
         
         # Sample negative edges
         negative_edges = []
@@ -303,9 +301,9 @@ class LinkPredictionDataset(PHEMEDataset):
             tweet_idx = random.randint(0, num_tweets - 1)
             user_idx = random.randint(0, num_users - 1)
             
-            if (tweet_idx, user_idx) not in existing_edges:
-                negative_edges.append([tweet_idx, user_idx])
-                existing_edges.add((tweet_idx, user_idx))
+            if (user_idx, tweet_idx) not in existing_edges:
+                negative_edges.append([user_idx, tweet_idx])
+                existing_edges.add((user_idx, tweet_idx))
             
             attempts += 1
         

@@ -374,15 +374,6 @@ class PHEMEGraphBuilder:
         )
         data['tweet', 'posted_by', 'user'].edge_index = tweet_to_author_edge_index
 
-        # 3b. Tweet -> User follow request hypothesis edges
-        follow_request_edge_index = build_follow_request_edges(
-            all_tweets, structure_edges, tweet_id_to_idx, user_id_to_idx
-        )
-        data['tweet', 'follow_request_sent', 'user'].edge_index = follow_request_edge_index
-
-        if add_reverse_edges:
-            data['user', 'follow_request_received', 'tweet'].edge_index = follow_request_edge_index.flip(0)
-
         # 4. User -> User (based on selected strategy)
         if self.user_edge_type != "none":
             user_edges = []

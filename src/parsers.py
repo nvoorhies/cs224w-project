@@ -150,7 +150,7 @@ def load_tweet_thread(thread_dir: Path, load_reactions: bool = True) -> TweetThr
     thread_dir = Path(thread_dir)
     thread_id = thread_dir.name
 
-    logger.info(f"Loading thread: {thread_id}")
+    # logger.info(f"Loading thread: {thread_id}")
 
     # Load annotation
     annotation_path = thread_dir / "annotation.json"
@@ -180,7 +180,7 @@ def load_tweet_thread(thread_dir: Path, load_reactions: bool = True) -> TweetThr
         reactions_dir = thread_dir / "reactions"
         if reactions_dir.exists():
             reaction_files = list(reactions_dir.glob("*.json"))
-            logger.info(f"Loading {len(reaction_files)} reaction tweets")
+            # logger.info(f"Loading {len(reaction_files)} reaction tweets")
 
             for reaction_file in reaction_files:
                 try:
@@ -199,11 +199,11 @@ def load_tweet_thread(thread_dir: Path, load_reactions: bool = True) -> TweetThr
         reaction_tweets=reaction_tweets,
     )
 
-    logger.info(
-        f"Successfully loaded thread {thread_id}: "
-        f"{len(reaction_tweets)} reactions, "
-        f"{len(structure.get_all_tweet_ids())} total tweets in structure"
-    )
+    # logger.info(
+    #     f"Successfully loaded thread {thread_id}: "
+    #     f"{len(reaction_tweets)} reactions, "
+    #     f"{len(structure.get_all_tweet_ids())} total tweets in structure"
+    # )
 
     return thread
 
@@ -259,7 +259,7 @@ def load_dataset(
 
     if max_threads is not None:
         thread_dirs = thread_dirs[:max_threads]
-        logger.info(f"Limiting to {max_threads} threads")
+        # logger.info(f"Limiting to {max_threads} threads")
 
     threads = []
     failed_count = 0
@@ -276,10 +276,10 @@ def load_dataset(
             else:
                 raise
 
-    logger.info(
-        f"Successfully loaded {len(threads)} threads "
-        f"({failed_count} failed)"
-    )
+    # logger.info(
+    #     f"Successfully loaded {len(threads)} threads "
+    #     f"({failed_count} failed)"
+    # )
 
     return threads
 

@@ -73,14 +73,6 @@ class HeteroGATLayer(nn.Module):
                 (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout,
                 negative_slope=negative_slope, add_self_loops=False
             )
-            conv_dict[('tweet', 'follow_request_sent', 'user')] = GATConv(
-                (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout,
-                negative_slope=negative_slope, add_self_loops=False
-            )
-            conv_dict[('user', 'follow_request_received', 'tweet')] = GATConv(
-                (user_dim, tweet_dim), out_channels, heads=heads, dropout=dropout,
-                negative_slope=negative_slope, add_self_loops=False
-            )
         
         # User -> User edges (homogeneous)
         if 'user' in in_channels_dict:
@@ -393,8 +385,8 @@ class HeteroGATLinkPrediction(nn.Module):
             tweet_emb = node_emb_dict['tweet']
             user_emb = node_emb_dict['user']
             
-            src_emb = tweet_emb[edge_label_index[0]]
-            dst_emb = user_emb[edge_label_index[1]]
+            src_emb = user_emb[edge_label_index[0]]
+            dst_emb = tweet_emb[edge_label_index[1]]
             
             link_pred = self.link_predictor(src_emb, dst_emb)
         

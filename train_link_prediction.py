@@ -325,6 +325,8 @@ def main():
         # Print metrics
         print(f"Epoch {epoch}/{args.epochs}")
         print(f"  Train Loss: {train_loss:.4f}")
+        # TODO: get train acc
+        # print(f"  Train Accuracy: {train_metrics_dict['accuracy']:.4f}")  # Added to display training accuracy
         print(f"  Val Loss: {val_loss:.4f}")
         print(f"  Val Accuracy: {val_metrics_dict['accuracy']:.4f}")
         print(f"  Val AUC-ROC: {val_metrics_dict['auc_roc']:.4f}")

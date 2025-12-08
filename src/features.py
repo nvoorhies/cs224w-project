@@ -221,13 +221,13 @@ def extract_temporal_features(
         reference_time: Reference time for relative features (e.g., thread start time)
 
     Returns:
-        Array of temporal features [1 dummy feature for now]
+        Array of temporal features [hour_of_day, day_of_week, unix_minutes, delta_minutes]
     """
     created_at = parse_twitter_timestamp(tweet.created_at)
 
     # Temporal context
-    hour_of_day = created_at.hour / 23.0  # Normalize to [0, 1]
-    day_of_week = created_at.weekday() / 6.0  # Normalize to [0, 1]
+    hour_of_day = created_at.hour / 24.0  # Normalize to [0, 1]
+    day_of_week = created_at.weekday() / 7.0  # Normalize to [0, 1]
     unix_minutes = created_at.timestamp() / 60_000_000.0  # Scale to keep float32 stable
 
     if reference_time:
