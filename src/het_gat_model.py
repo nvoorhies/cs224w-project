@@ -9,7 +9,7 @@ the PHEME dataset.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import HeteroConv, GATConv, Linear
+from torch_geometric.nn import HeteroConv, GATConv, Linear, TransformerConv, GCN
 from torch_geometric.data import HeteroData
 from typing import Dict, Tuple, Optional
 
@@ -52,38 +52,32 @@ class HeteroGATLayer(nn.Module):
         # Tweet -> Tweet edges (homogeneous)
         if 'tweet' in in_channels_dict:
             tweet_dim = in_channels_dict['tweet']
-            conv_dict[('tweet', 'replies_to', 'tweet')] = GATConv(
+            conv_dict[('tweet', 'replies_to', 'tweet')] = TransformerConv(
                 tweet_dim, out_channels, heads=heads, dropout=dropout,
-                negative_slope=negative_slope, add_self_loops=add_self_loops
             )
-            conv_dict[('tweet', 'replied_by', 'tweet')] = GATConv(
+            conv_dict[('tweet', 'replied_by', 'tweet')] = TransformerConv(
                 tweet_dim, out_channels, heads=heads, dropout=dropout,
-                negative_slope=negative_slope, add_self_loops=add_self_loops
             )
         
         # User -> Tweet edges (heterogeneous)
         if 'user' in in_channels_dict and 'tweet' in in_channels_dict:
             user_dim = in_channels_dict['user']
             tweet_dim = in_channels_dict['tweet']
-            conv_dict[('user', 'posts', 'tweet')] = GATConv(
+            conv_dict[('user', 'posts', 'tweet')] = TransformerConv(
                 (user_dim, tweet_dim), out_channels, heads=heads, dropout=dropout,
-                negative_slope=negative_slope, add_self_loops=False
             )
-            conv_dict[('tweet', 'posted_by', 'user')] = GATConv(
+            conv_dict[('tweet', 'posted_by', 'user')] = TransformerConv(
                 (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout,
-                negative_slope=negative_slope, add_self_loops=False
             )
         
         # User -> User edges (homogeneous)
         if 'user' in in_channels_dict:
             user_dim = in_channels_dict['user']
-            conv_dict[('user', 'interacts_with', 'user')] = GATConv(
+            conv_dict[('user', 'interacts_with', 'user')] = TransformerConv(
                 user_dim, out_channels, heads=heads, dropout=dropout,
-                negative_slope=negative_slope, add_self_loops=add_self_loops
             )
-            conv_dict[('user', 'interacted_by', 'user')] = GATConv(
+            conv_dict[('user', 'interacted_by', 'user')] = TransformerConv(
                 user_dim, out_channels, heads=heads, dropout=dropout,
-                negative_slope=negative_slope, add_self_loops=add_self_loops
             )
         
         # Use HeteroConv to wrap the individual conv layers
