@@ -83,7 +83,7 @@ class LinkPredictionDataset(PHEMEDataset):
         max_threads: Optional[int] = None,
         split: Optional[str] = None,
         split_ratios: tuple[float, float, float] = (0.7, 0.15, 0.15),
-        include_temporal_encoding: bool = True,
+        include_temporal_encoding: bool = False,
         temporal_encoding_dim: int = 16,
         normalize_features: bool = False,
         user_edge_type: str = "replies",

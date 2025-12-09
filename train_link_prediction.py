@@ -28,7 +28,8 @@ from src.link_prediction_dataset import (
 def filter_edges(x_dict, edge_index_dict):
     """Temporal filter: Remove nodes and edges involving nodes with delta_minutes cutoff t """
     tweet_node_features = x_dict['tweet']
-    delta_minutes_idx = -17
+    delta_minutes_idx = 13  # include_temporal_encoding = False
+    # print(tweet_node_features.shape)
     delta_minutes = tweet_node_features[:, delta_minutes_idx]
     
     # Calculate cutoff_t as the median of all delta_minutes

@@ -320,7 +320,7 @@ def create_temporal_positional_encoding(
 def extract_all_tweet_features(
     tweets: Dict[str, Tweet],
     reference_time: Optional[datetime] = None,
-    include_temporal_encoding: bool = True,
+    include_temporal_encoding: bool = False,
     temporal_encoding_dim: int = 16,
     edges: Optional[List[tuple[str, str]]] = None
 ) -> tuple[Dict[str, np.ndarray], int]:

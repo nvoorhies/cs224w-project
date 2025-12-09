@@ -264,7 +264,7 @@ class PHEMEGraphBuilder:
 
     def __init__(
         self,
-        include_temporal_encoding: bool = True,
+        include_temporal_encoding: bool = False,
         temporal_encoding_dim: int = 16,
         normalize_features: bool = False,
         user_edge_type: Literal["mentions", "replies", "both", "none"] = "replies"
@@ -424,7 +424,7 @@ class PHEMEGraphBuilder:
 
 def thread_to_graph(
     thread: TweetThread,
-    include_temporal_encoding: bool = True,
+    include_temporal_encoding: bool = False,
     temporal_encoding_dim: int = 16,
     normalize_features: bool = False,
     user_edge_type: Literal["mentions", "replies", "both", "none"] = "replies",
