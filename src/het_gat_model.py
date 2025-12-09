@@ -123,10 +123,10 @@ class HeteroGATLayer(nn.Module):
 
 class TemporalHeteroGAT(nn.Module):
     """
-    Temporal Heterogeneous Graph Attention Transformer for link prediction.
+    Temporal Heterogeneous Graph Attention Network for link prediction.
     
     This model processes heterogeneous graphs with temporal information
-    to predict links (e.g., follow requests) between tweets and users.
+    to predict links between tweets and users.
     """
     
     def __init__(

@@ -25,6 +25,26 @@ from src.link_prediction_dataset import (
     ALL_STORIES,
 )
 
+def filter_edges(x_dict, edge_index_dict):
+    """Temporal filter: Remove nodes and edges involving nodes with delta_minutes cutoff t """
+    tweet_node_features = x_dict['tweet']
+    delta_minutes_idx = -17
+    delta_minutes = tweet_node_features[:, delta_minutes_idx]
+    
+    # Calculate cutoff_t as the median of all delta_minutes
+    cutoff_t = torch.median(delta_minutes).item()
+    # print("Median cutoff_t:", cutoff_t)  # e.g. 8.966666221618652
+
+    valid_nodes = delta_minutes <= cutoff_t
+
+    # remove tweet to tweet reply edges
+    for edge_type, edge_index in edge_index_dict.items():
+        if edge_type[0] == 'tweet' and edge_type[2] == 'tweet':
+            # print("edge_index shape before:", edge_index_dict[edge_type].shape)  # e.g. torch.Size([2, 18])
+            valid_edges = valid_nodes[edge_index[0]] & valid_nodes[edge_index[1]]
+            edge_index_dict[edge_type] = edge_index[:, valid_edges]
+            # print("edge_index shape after (should be smaller):", edge_index_dict[edge_type].shape)  # e.g. torch.Size([2, 9])
+    
 
 def train_epoch(model, train_loader, optimizer, device):
     """Train for one epoch."""
@@ -42,6 +62,8 @@ def train_epoch(model, train_loader, optimizer, device):
             edge_type: batch[edge_type].edge_index 
             for edge_type in batch.edge_types
         }
+
+        filter_edges(x_dict, edge_index_dict)
         
         # Get link prediction labels
         # Note: For batched graphs, edge_label_index should be adjusted by PyG's collate
@@ -93,6 +115,8 @@ def evaluate(model, loader, device):
             edge_type: batch[edge_type].edge_index 
             for edge_type in batch.edge_types
         }
+
+        filter_edges(x_dict, edge_index_dict)
         
         # Get link prediction labels
         if hasattr(batch, 'edge_label_index') and batch.edge_label_index is not None:
