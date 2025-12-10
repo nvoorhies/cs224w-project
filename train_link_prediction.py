@@ -24,6 +24,7 @@ from src.link_prediction_dataset import (
     split_stories,
     ALL_STORIES,
 )
+from visualize import *
 
 def filter_edges(x_dict, edge_index_dict):
     """Temporal filter: Remove nodes and edges involving nodes with delta_minutes cutoff t """
@@ -64,7 +65,11 @@ def train_epoch(model, train_loader, optimizer, device):
             for edge_type in batch.edge_types
         }
 
+        if num_graphs < 10: visualize_input("Full Thread HeteroData Graph (Green=Tweet node, Purple=User node)", edge_index_dict)
+
         filter_edges(x_dict, edge_index_dict)
+
+        if num_graphs < 10: visualize_input("Thread HeteroData Graph Filtered by Time Cutoff", edge_index_dict)
         
         # Get link prediction labels
         # Note: For batched graphs, edge_label_index should be adjusted by PyG's collate
@@ -74,6 +79,8 @@ def train_epoch(model, train_loader, optimizer, device):
             
         edge_label_index = batch.edge_label_index
         edge_label = batch.edge_label.float()
+
+        if num_graphs < 10: visualize_input("Edge Labels for Link Prediction Task (Green=Positive edge, Orange=Negative)", edge_index_dict, edge_label_index, edge_label)
         
         # Skip graphs without link labels
         if edge_label.numel() == 0 or edge_label_index.numel() == 0:
@@ -81,7 +88,9 @@ def train_epoch(model, train_loader, optimizer, device):
 
         # Forward pass
         optimizer.zero_grad()
-        _, link_pred = model(x_dict, edge_index_dict, edge_label_index)
+        node_emb_dict, att_dict, link_pred = model(x_dict, edge_index_dict, edge_label_index)
+        if num_graphs < 10: visualize_graph(node_emb_dict, att_dict)
+
         
         # Compute loss
         loss = F.binary_cross_entropy_with_logits(link_pred, edge_label)

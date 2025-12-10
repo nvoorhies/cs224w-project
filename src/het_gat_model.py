@@ -20,6 +20,7 @@ from torch_geometric.nn.module_dict import ModuleDict
 from torch_geometric.typing import EdgeType, NodeType
 from torch_geometric.utils.hetero import check_add_self_loops
 
+
 class HeteroGATLayer(nn.Module):
     """
     Single layer of heterogeneous GAT using PyTorch Geometric's HeteroConv.
@@ -248,7 +249,7 @@ class TemporalHeteroGAT(nn.Module):
         #     print()
         #     print("Interesting att_dict with multiple incoming edges splitting attention", att_dict)
         
-        return out_dict
+        return out_dict, att_dict
     
     @property
     def dropout(self) -> float:
@@ -391,7 +392,7 @@ class HeteroGATLinkPrediction(nn.Module):
             Tuple of (node_embeddings_dict, link_predictions)
         """
         # Get node embeddings
-        node_emb_dict = self.encoder(x_dict, edge_index_dict)
+        node_emb_dict, att_dict = self.encoder(x_dict, edge_index_dict)
         
         # Predict links if edge_label_index is provided
         link_pred = None
@@ -404,7 +405,7 @@ class HeteroGATLinkPrediction(nn.Module):
             
             link_pred = self.link_predictor(src_emb, dst_emb)
         
-        return node_emb_dict, link_pred
+        return node_emb_dict, att_dict, link_pred
     
     def encode_nodes(
         self,
@@ -587,3 +588,6 @@ class HeteroConv(torch.nn.Module):
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}(num_relations={len(self.convs)})'
+
+
+
