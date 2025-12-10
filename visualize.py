@@ -2,9 +2,9 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
 
-def visualize_input(title, edge_index_dict, edge_label_index = None, edge_label = None):
+def visualize_input(title, edge_index_dict, edge_label_index = None, edge_label = None, pos = None, G = nx.DiGraph()):
     """Visualize input graph structure for the given thread with edges defined in edge_index_dict."""
-    G = nx.DiGraph()
+    G.clear_edges()
 
     # Add edges from edge_index_dict
     for edge_type, edge_index in edge_index_dict.items():
@@ -22,10 +22,6 @@ def visualize_input(title, edge_index_dict, edge_label_index = None, edge_label 
             color = 'green' if label == 1 else 'orange'
             G.add_edge(src, dst, label=label, color=color)
 
-    # Draw the graph
-    plt.figure(figsize=(12, 8))
-    pos = nx.spring_layout(G, k=0.5, seed=42)
-
     # Color nodes by type
     node_colors = []
     for node in G.nodes():
@@ -35,13 +31,14 @@ def visualize_input(title, edge_index_dict, edge_label_index = None, edge_label 
             node_colors.append('purple')
     
     # Draw the graph
-    pos = nx.spring_layout(G, k=0.5, seed=42)  # Adjust layout to reduce overlap
+    if pos is None:
+        pos = nx.spring_layout(G, k=0.5, seed=42)
 
     # Offset reverse edges slightly for visibility
-    for edge in G.edges:
-        if (edge[1], edge[0]) in G.edges:  # Check for reverse edge
-            pos[edge[0]] += (0.5, 0.5)  # Offset source node slightly
-            pos[edge[1]] -= (0.5, 0.5)  # Offset target node slightly
+    # for edge in G.edges:
+    #     if (edge[1], edge[0]) in G.edges:  # Check for reverse edge
+    #         pos[edge[0]] += (0.5, 0.5)  # Offset source node slightly
+    #         pos[edge[1]] -= (0.5, 0.5)  # Offset target node slightly
 
     edge_colors = [G[u][v]['color'] for u, v in G.edges()]
     nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=300)
@@ -53,9 +50,11 @@ def visualize_input(title, edge_index_dict, edge_label_index = None, edge_label 
     plt.axis("off")
     plt.tight_layout()
     plt.show()
+
+    return pos
     
 
-def visualize_graph(h_dict, att_dict):
+def visualize_graph(h_dict, att_dict, pos = None, G = nx.DiGraph()):
     """
     Visualize node embeddings and edge attention weights.
 
@@ -65,23 +64,24 @@ def visualize_graph(h_dict, att_dict):
         edge_index_dict: Dictionary of edge indices {edge_type: Tensor}.
     """
     # Create a graph
-    G = nx.DiGraph()
+    G.clear_edges()
 
     # Add nodes with embedding-based color
-    node_colors = {}
-    node_outlines = {}
+    # node_colors = {}
+    # node_outlines = {}
     for node_type, embeddings in h_dict.items():
         for i, embedding in enumerate(embeddings):
             # Normalize embedding for color scaling
             color_intensity = np.linalg.norm(embedding.detach().numpy())
-            node_colors[(node_type, i)] = color_intensity
+            # node_colors[(node_type, i)] = color_intensity
 
             if node_type == 'tweet':
                 outline_color = "green"
             else:
                 outline_color = "purple"
-            node_outlines[(node_type, i)] = outline_color
-            G.add_node((node_type, i), color=color_intensity)
+            # node_outlines[(node_type, i)] = outline_color
+            G.nodes[(node_type, i)]['color']=color_intensity
+            G.nodes[(node_type, i)]['outline_color']=outline_color
 
     # Add edges with attention-based color
     edge_colors = []
@@ -108,17 +108,21 @@ def visualize_graph(h_dict, att_dict):
 
     # Draw the graph
     plt.figure(figsize=(12, 8))
-    pos = nx.spring_layout(G, k=0.5, seed=42)  # Adjust layout to reduce overlap
+    if pos is None:
+        pos = nx.spring_layout(G, k=0.5, seed=42)
 
     # Offset reverse edges slightly for visibility
-    for edge in G.edges:
-        if (edge[1], edge[0]) in G.edges:  # Check for reverse edge
-            pos[edge[0]] += (0.5, 0.5)  # Offset source node slightly
-            pos[edge[1]] -= (0.5, 0.5)  # Offset target node slightly
+    # for edge in G.edges:
+    #     if (edge[1], edge[0]) in G.edges:  # Check for reverse edge
+    #         pos[edge[0]] += (0.5, 0.5)  # Offset source node slightly
+    #         pos[edge[1]] -= (0.5, 0.5)  # Offset target node slightly
 
     # Draw nodes with black outlines
-    node_color_values = [node_colors[node] for node in G.nodes]
-    node_outline_values = [node_outlines[node] for node in G.nodes]
+    # node_color_values = [node_colors[node] for node in G.nodes]
+    # node_outline_values = [node_outlines[node] for node in G.nodes]
+
+    node_color_values = [G.nodes[node]['color'] for node in G.nodes]
+    node_outline_values = [G.nodes[node]['outline_color'] for node in G.nodes]
 
     nx.draw_networkx_nodes(
         G, pos, node_color=node_color_values, cmap=plt.cm.Blues, node_size=300,
@@ -153,3 +157,5 @@ def visualize_graph(h_dict, att_dict):
     #     print(f"Attention Weights: {att_weights}")
 
     plt.show()
+
+    return pos

@@ -12,6 +12,7 @@ from torch_geometric.loader import DataLoader
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
+import networkx as nx
 import numpy as np
 from pathlib import Path
 import json
@@ -65,11 +66,14 @@ def train_epoch(model, train_loader, optimizer, device, vis):
             for edge_type in batch.edge_types
         }
 
-        if vis and num_graphs < 10: visualize_input("Full Thread HeteroData Graph (Green=Tweet node, Purple=User node)", edge_index_dict)
+        if vis and num_graphs < 10: 
+            G = nx.DiGraph()
+            pos = visualize_input("Full Thread HeteroData Graph (Green=Tweet node, Purple=User node)", edge_index_dict, G=G)
 
         filter_edges(x_dict, edge_index_dict)
 
-        if vis and num_graphs < 10: visualize_input("Thread HeteroData Graph Filtered by Time Cutoff", edge_index_dict)
+        if vis and num_graphs < 10: 
+            visualize_input("Thread HeteroData Graph Filtered by Time Cutoff", edge_index_dict, pos=pos, G=G)
         
         # Get link prediction labels
         # Note: For batched graphs, edge_label_index should be adjusted by PyG's collate
@@ -80,7 +84,8 @@ def train_epoch(model, train_loader, optimizer, device, vis):
         edge_label_index = batch.edge_label_index
         edge_label = batch.edge_label.float()
 
-        if vis and num_graphs < 10: visualize_input("Edge Labels for Link Prediction Task (Green=Positive edge, Orange=Negative)", edge_index_dict, edge_label_index, edge_label)
+        if vis and num_graphs < 10: 
+            visualize_input("Edge Labels for Link Prediction Task (Green=Positive edge, Orange=Negative)", edge_index_dict, edge_label_index, edge_label, pos=pos, G=G)
         
         # Skip graphs without link labels
         if edge_label.numel() == 0 or edge_label_index.numel() == 0:
@@ -89,7 +94,8 @@ def train_epoch(model, train_loader, optimizer, device, vis):
         # Forward pass
         optimizer.zero_grad()
         node_emb_dict, att_dict, link_pred = model(x_dict, edge_index_dict, edge_label_index)
-        if vis and num_graphs < 10: visualize_graph(node_emb_dict, att_dict)
+        if vis and num_graphs < 10: 
+            visualize_graph(node_emb_dict, att_dict, pos=pos, G=G)
 
         
         # Compute loss
