@@ -307,8 +307,13 @@ def create_temporal_positional_encoding(
     Returns:
         Positional encoding vector [d_model dimensions]
     """
-    # TODO: Add encoding logic (e.g., sinusoidal)
+    # Sinusoidal positional encoding
     encoding = np.zeros(d_model)
+    for i in range(0, d_model, 2):
+        div_term = 10000 ** (i / d_model)
+        encoding[i] = np.sin(position / div_term)
+        if i + 1 < d_model:
+            encoding[i + 1] = np.cos(position / div_term)    
 
     return encoding.astype(np.float32)
 
@@ -343,6 +348,16 @@ def extract_all_tweet_features(
     positions = None
     if include_temporal_encoding and edges:
         positions = compute_temporal_positions(tweets, edges)
+        # set position to 0 for tweets that're created after the median time
+        timestamps = []
+        for tweet_id, tweet in tweets.items():
+            created_at = parse_twitter_timestamp(tweet.created_at)
+            timestamps.append(created_at)
+        median_time = sorted(timestamps)[len(timestamps) // 2]
+        for tweet_id, tweet in tweets.items():
+            created_at = parse_twitter_timestamp(tweet.created_at)
+            if created_at > median_time:
+                positions[tweet_id] = 0
     elif include_temporal_encoding:
         # Fallback: assign position 0 when no edges are present
         positions = {tweet_id: 0 for tweet_id in tweets.keys()}

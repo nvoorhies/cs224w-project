@@ -1,4 +1,5 @@
 {
+  "visualize": false,
   "data_root": "data/all-rnr-annotated-threads",
   "max_threads": null,
   "train_ratio": 0.7,
