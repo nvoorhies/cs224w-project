@@ -74,17 +74,15 @@ class HeteroGATLayer(nn.Module):
                 negative_slope=negative_slope, add_self_loops=False
             )
         
-        # User -> User edges (homogeneous)
-        if 'user' in in_channels_dict:
-            user_dim = in_channels_dict['user']
-            conv_dict[('user', 'interacts_with', 'user')] = GATv2Conv(
-                (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout,
-                negative_slope=negative_slope, add_self_loops=add_self_loops
-            )
-            conv_dict[('user', 'interacted_by', 'user')] = GATv2Conv(
-                (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout,
-                negative_slope=negative_slope, add_self_loops=add_self_loops
-            )
+        # # User -> User edges (homogeneous)
+        # if 'user' in in_channels_dict:
+        #     user_dim = in_channels_dict['user']
+        #     conv_dict[('user', 'interacts_with', 'user')] = TransformerConv(
+        #         (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout, beta=True
+        #     )
+        #     conv_dict[('user', 'interacted_by', 'user')] = TransformerConv(
+        #         (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout, beta=True
+        #     )
         
         # Use HeteroConv to wrap the individual conv layers
         self.conv = HeteroConv(conv_dict, aggr='mean')

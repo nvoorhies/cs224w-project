@@ -374,32 +374,32 @@ class PHEMEGraphBuilder:
         )
         data['tweet', 'posted_by', 'user'].edge_index = tweet_to_author_edge_index
 
-        # 4. User -> User (based on selected strategy)
-        if self.user_edge_type != "none":
-            user_edges = []
+        # # 4. User -> User (based on selected strategy)
+        # if self.user_edge_type != "none":
+        #     user_edges = []
 
-            if self.user_edge_type in ["mentions", "both"]:
-                mention_edges = build_mention_edges(
-                    all_tweets, all_users, user_id_to_idx
-                )
-                if mention_edges.shape[1] > 0:
-                    user_edges.append(mention_edges)
+        #     if self.user_edge_type in ["mentions", "both"]:
+        #         mention_edges = build_mention_edges(
+        #             all_tweets, all_users, user_id_to_idx
+        #         )
+        #         if mention_edges.shape[1] > 0:
+        #             user_edges.append(mention_edges)
 
-            if self.user_edge_type in ["replies", "both"]:
-                reply_edges = build_reply_based_user_edges(
-                    all_tweets, structure_edges, user_id_to_idx
-                )
-                if reply_edges.shape[1] > 0:
-                    user_edges.append(reply_edges)
+        #     if self.user_edge_type in ["replies", "both"]:
+        #         reply_edges = build_reply_based_user_edges(
+        #             all_tweets, structure_edges, user_id_to_idx
+        #         )
+        #         if reply_edges.shape[1] > 0:
+        #             user_edges.append(reply_edges)
 
-            if user_edges:
-                # Combine and deduplicate
-                combined_edges = torch.cat(user_edges, dim=1)
-                unique_edges = torch.unique(combined_edges, dim=1)
-                data['user', 'interacts_with', 'user'].edge_index = unique_edges
+        #     if user_edges:
+        #         # Combine and deduplicate
+        #         combined_edges = torch.cat(user_edges, dim=1)
+        #         unique_edges = torch.unique(combined_edges, dim=1)
+        #         data['user', 'interacts_with', 'user'].edge_index = unique_edges
 
-                if add_reverse_edges:
-                    data['user', 'interacted_by', 'user'].edge_index = unique_edges.flip(0)
+        #         if add_reverse_edges:
+        #             data['user', 'interacted_by', 'user'].edge_index = unique_edges.flip(0)
 
         # Add thread metadata
         data.thread_id = thread.thread_id
@@ -427,7 +427,7 @@ def thread_to_graph(
     include_temporal_encoding: bool = False,
     temporal_encoding_dim: int = 16,
     normalize_features: bool = False,
-    user_edge_type: Literal["mentions", "replies", "both", "none"] = "replies",
+    user_edge_type: Literal["mentions", "replies", "both", "none"] = "none",
     add_reverse_edges: bool = True
 ) -> HeteroData:
     """
