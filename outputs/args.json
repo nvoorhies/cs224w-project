@@ -7,6 +7,7 @@
   "split_seed": 42,
   "user_edge_type": "replies",
   "num_negative_samples": 1,
+  "model": "GAT",
   "hidden_channels": 64,
   "out_channels": 32,
   "num_layers": 2,
