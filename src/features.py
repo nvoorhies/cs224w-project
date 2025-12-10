@@ -346,21 +346,43 @@ def extract_all_tweet_features(
 
     # Compute temporal positions if needed
     positions = None
-    if include_temporal_encoding and edges:
-        positions = compute_temporal_positions(tweets, edges)
-        # set position to 0 for tweets that're created after the median time
-        timestamps = []
+    # if include_temporal_encoding and edges:
+    #     positions = compute_temporal_positions(tweets, edges)
+    #     # set position to 0 for tweets that're created after the median time
+    #     timestamps = []
+    #     for tweet_id, tweet in tweets.items():
+    #         created_at = parse_twitter_timestamp(tweet.created_at)
+    #         timestamps.append(created_at)
+    #     median_time = sorted(timestamps)[len(timestamps) // 2]
+    #     for tweet_id, tweet in tweets.items():
+    #         created_at = parse_twitter_timestamp(tweet.created_at)
+    #         if created_at > median_time:
+    #             positions[tweet_id] = 0
+    # elif include_temporal_encoding:
+    #     # Fallback: assign position 0 when no edges are present
+    #     positions = {tweet_id: 0 for tweet_id in tweets.keys()}
+    if include_temporal_encoding:
+        # Collect timestamps for all tweets
+        timestamps = []  # List[Tup[tweet_id,created_at]]
         for tweet_id, tweet in tweets.items():
             created_at = parse_twitter_timestamp(tweet.created_at)
-            timestamps.append(created_at)
-        median_time = sorted(timestamps)[len(timestamps) // 2]
-        for tweet_id, tweet in tweets.items():
-            created_at = parse_twitter_timestamp(tweet.created_at)
+            timestamps.append((tweet_id, created_at))
+        
+        # Sort by timestamp
+        timestamps.sort(key=lambda x: x[1])
+        
+        # Find median time
+        median_time = timestamps[len(timestamps) // 2][1]
+        
+        # Assign positions based on sorted order
+        positions = {}
+        rank = 1
+        for tweet_id, created_at in timestamps:
             if created_at > median_time:
                 positions[tweet_id] = 0
-    elif include_temporal_encoding:
-        # Fallback: assign position 0 when no edges are present
-        positions = {tweet_id: 0 for tweet_id in tweets.keys()}
+            else:
+                positions[tweet_id] = rank
+                rank += 1
 
     for tweet_id, tweet in tweets.items():
         # Base features
