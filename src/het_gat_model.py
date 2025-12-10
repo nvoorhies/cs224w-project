@@ -53,10 +53,10 @@ class HeteroGATLayer(nn.Module):
         if 'tweet' in in_channels_dict:
             tweet_dim = in_channels_dict['tweet']
             conv_dict[('tweet', 'replies_to', 'tweet')] = TransformerConv(
-                tweet_dim, out_channels, heads=heads, dropout=dropout,
+                tweet_dim, out_channels, heads=heads, dropout=dropout, beta=True
             )
             conv_dict[('tweet', 'replied_by', 'tweet')] = TransformerConv(
-                tweet_dim, out_channels, heads=heads, dropout=dropout,
+                tweet_dim, out_channels, heads=heads, dropout=dropout, beta=True
             )
         
         # User -> Tweet edges (heterogeneous)
@@ -64,20 +64,20 @@ class HeteroGATLayer(nn.Module):
             user_dim = in_channels_dict['user']
             tweet_dim = in_channels_dict['tweet']
             conv_dict[('user', 'posts', 'tweet')] = TransformerConv(
-                (user_dim, tweet_dim), out_channels, heads=heads, dropout=dropout,
+                (user_dim, tweet_dim), out_channels, heads=heads, dropout=dropout, beta=True
             )
             conv_dict[('tweet', 'posted_by', 'user')] = TransformerConv(
-                (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout,
+                (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout, beta=True
             )
         
         # User -> User edges (homogeneous)
         if 'user' in in_channels_dict:
             user_dim = in_channels_dict['user']
             conv_dict[('user', 'interacts_with', 'user')] = TransformerConv(
-                user_dim, out_channels, heads=heads, dropout=dropout,
+                user_dim, out_channels, heads=heads, dropout=dropout, beta=True
             )
             conv_dict[('user', 'interacted_by', 'user')] = TransformerConv(
-                user_dim, out_channels, heads=heads, dropout=dropout,
+                user_dim, out_channels, heads=heads, dropout=dropout, beta=True
             )
         
         # Use HeteroConv to wrap the individual conv layers
