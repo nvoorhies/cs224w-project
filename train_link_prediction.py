@@ -35,7 +35,7 @@ def filter_edges(x_dict, edge_index_dict):
     delta_minutes = tweet_node_features[:, delta_minutes_idx]
     
     # Calculate cutoff_t as the median of all delta_minutes
-    cutoff_t = torch.median(delta_minutes).item()
+    cutoff_t = torch.quantile(delta_minutes, 0.5, interpolation='lower').item()
     # print("Median cutoff_t:", cutoff_t)  # e.g. 8.966666221618652
 
     valid_nodes = delta_minutes <= cutoff_t
@@ -47,6 +47,78 @@ def filter_edges(x_dict, edge_index_dict):
             valid_edges = valid_nodes[edge_index[0]] & valid_nodes[edge_index[1]]
             edge_index_dict[edge_type] = edge_index[:, valid_edges]
             # print("edge_index shape after (should be smaller):", edge_index_dict[edge_type].shape)  # e.g. torch.Size([2, 9])
+
+
+def filter_labels(edge_index_dict, edge_label_index, edge_label):
+    """
+        Remove positive edges where the reply tweet is before cutoff time to avoid temporal leakage.
+        
+        If tweetB->tweetA reply_to edge exists in edge_index_dict (before cutoff),
+        find userB (author of tweetB) and remove positive edge userB->tweetA.
+        Then balance negative edges to match the number of remaining positive edges.
+    """
+    # Get tweet reply edges if they exist
+    reply_edge_type = ('tweet', 'replies_to', 'tweet')
+    if reply_edge_type not in edge_index_dict:
+        return
+    
+    reply_edges = edge_index_dict[reply_edge_type]  # [2, num_reply_edges]
+    
+    # Separate positive and negative edges
+    pos_mask = edge_label == 1
+    neg_mask = edge_label == 0
+    
+    pos_edge_index = edge_label_index[:, pos_mask]  # [2, num_pos]
+    neg_edge_index = edge_label_index[:, neg_mask]  # [2, num_neg]
+    
+    # Find positive edges to remove
+    # For each positive edge (user->tweet), check if there's a reply (tweet->tweet) from user's tweet
+    edges_to_keep = []
+    for i in range(pos_edge_index.shape[1]):
+        user_idx = pos_edge_index[0, i]
+        tweet_idx = pos_edge_index[1, i]
+        
+        # Find tweets authored by this user (from edge_index_dict)
+        # We need ('user', 'posts', 'tweet') edges to find user's tweets
+        posts_edge_type = ('user', 'posts', 'tweet')
+        if posts_edge_type in edge_index_dict:
+            posts_edges = edge_index_dict[posts_edge_type]
+            user_tweets = posts_edges[1, posts_edges[0] == user_idx]  # tweets by this user
+            
+            # Check if any of user's tweets reply to the target tweet
+            # reply_edges: [source_tweet, target_tweet]
+            has_reply = False
+            for user_tweet in user_tweets:
+                # Check if user_tweet -> tweet_idx exists in reply_edges
+                if torch.any((reply_edges[0] == user_tweet) & (reply_edges[1] == tweet_idx)):
+                    has_reply = True
+                    break
+            if not has_reply:
+                edges_to_keep.append(i)
+        else:
+            # If we can't verify, keep the edge
+            edges_to_keep.append(i)
+    
+    # Filter positive edges
+    if len(edges_to_keep) < pos_edge_index.shape[1]:
+        edges_to_keep = torch.tensor(edges_to_keep, dtype=torch.long, device=pos_edge_index.device)
+        pos_edge_index = pos_edge_index[:, edges_to_keep]
+        
+        # Balance negative edges to match positive edges
+        num_pos = pos_edge_index.shape[1]
+        if neg_edge_index.shape[1] > num_pos:
+            # Randomly sample negative edges
+            perm = torch.randperm(neg_edge_index.shape[1])[:num_pos]
+            neg_edge_index = neg_edge_index[:, perm]
+        
+        # Reconstruct edge_label_index and edge_label
+        edge_label_index = torch.cat([pos_edge_index, neg_edge_index], dim=1)
+        pos_labels = torch.ones(pos_edge_index.shape[1], device=edge_label.device)
+        neg_labels = torch.zeros(neg_edge_index.shape[1], device=edge_label.device)
+        edge_label = torch.cat([pos_labels, neg_labels], dim=0)
+        # print(f"Filtered positive edges: {pos_mask.sum().item()} -> {num_pos}")  # e.g. 35 -> 27
+    
+    return edge_label_index, edge_label
     
 
 def train_epoch(model, train_loader, optimizer, device, vis):
@@ -83,6 +155,11 @@ def train_epoch(model, train_loader, optimizer, device, vis):
             
         edge_label_index = batch.edge_label_index
         edge_label = batch.edge_label.float()
+
+        # if tweetB->tweetA reply_to edge is in the edge_index_dict (meaning it's before cutoff time and kept in the input graph to message passing), 
+        # then we find the author (userB) of the reply (tweetB) and remove the positive edge that connects userB->tweetA reply relation.
+        # Negatve edges don't need filtering but the quantity should match the filtered positve edges.
+        edge_label_index, edge_label = filter_labels(edge_index_dict, edge_label_index, edge_label)
 
         if vis and num_graphs < 10: 
             visualize_input("Edge Labels for Link Prediction Task (Green=Positive edge, Orange=Negative)", edge_index_dict, edge_label_index, edge_label, pos=pos, G=G)
@@ -138,6 +215,9 @@ def evaluate(model, loader, device):
         if hasattr(batch, 'edge_label_index') and batch.edge_label_index is not None:
             edge_label_index = batch.edge_label_index
             edge_label = batch.edge_label.float()
+
+            edge_label_index, edge_label = filter_labels(edge_index_dict, edge_label_index, edge_label)
+
         else:
             continue
         

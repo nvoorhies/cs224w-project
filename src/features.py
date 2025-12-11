@@ -349,15 +349,15 @@ def extract_all_tweet_features(
     # Use reply structure for positions
     if include_temporal_encoding and edges:
         positions = compute_temporal_positions(tweets, edges)
-        # set position to 0 for tweets that're created after the median time
+        # set position to 0 for tweets that're created after the cutoff time
         timestamps = []
         for tweet_id, tweet in tweets.items():
             created_at = parse_twitter_timestamp(tweet.created_at)
             timestamps.append(created_at)
-        median_time = sorted(timestamps)[len(timestamps) // 2]
+        time_cutoff = sorted(timestamps)[len(timestamps) * 2 // 4]  # Q1, Median, or Q4
         for tweet_id, tweet in tweets.items():
             created_at = parse_twitter_timestamp(tweet.created_at)
-            if created_at > median_time:
+            if created_at > time_cutoff:
                 positions[tweet_id] = 0
     elif include_temporal_encoding:
         # Fallback: assign position 0 when no edges are present

@@ -49,7 +49,7 @@ def visualize_input(title, edge_index_dict, edge_label_index = None, edge_label 
     plt.title(title)
     plt.axis("off")
     plt.tight_layout()
-    plt.show()
+    plt.show(block=True)
 
     return pos
     
@@ -66,20 +66,16 @@ def visualize_graph(h_dict, att_dict, pos = None, G = nx.DiGraph()):
     # Create a graph
     G.clear_edges()
 
-    # Add nodes with embedding-based color
-    # node_colors = {}
-    # node_outlines = {}
+    # Updatte node attributes with embedding-based color
     for node_type, embeddings in h_dict.items():
         for i, embedding in enumerate(embeddings):
             # Normalize embedding for color scaling
             color_intensity = np.linalg.norm(embedding.detach().numpy())
-            # node_colors[(node_type, i)] = color_intensity
 
             if node_type == 'tweet':
                 outline_color = "green"
             else:
                 outline_color = "purple"
-            # node_outlines[(node_type, i)] = outline_color
             G.nodes[(node_type, i)]['color']=color_intensity
             G.nodes[(node_type, i)]['outline_color']=outline_color
 
