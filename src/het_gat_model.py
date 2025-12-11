@@ -93,46 +93,76 @@ class HeteroGATLayer(nn.Module):
         dropout: float = 0.0,
         negative_slope: float = 0.2,
         add_self_loops: bool = True,
+        conv_type: str = 'transformer',
     ):
         """
         Initialize HeteroGATLayer.
-        
+
         Args:
             in_channels_dict: Dictionary mapping node type to input feature dim
             out_channels: Output dimension for each head
             heads: Number of attention heads
             dropout: Dropout probability
-            negative_slope: Negative slope for LeakyReLU
-            add_self_loops: Whether to add self-loops
+            negative_slope: Negative slope for LeakyReLU (used by GATConv)
+            add_self_loops: Whether to add self-loops (used by GATConv)
+            conv_type: Type of attention layer ('transformer' or 'gat')
         """
         super().__init__()
         self.heads = heads
         self.out_channels = out_channels
         self.dropout = dropout
-        
-        # Create a dictionary of GAT layers for each edge type
+        self.conv_type = conv_type
+
+        # Create a dictionary of attention layers for each edge type
         conv_dict = {}
-        
+
         # Tweet -> Tweet edges (homogeneous)
         if 'tweet' in in_channels_dict:
             tweet_dim = in_channels_dict['tweet']
-            conv_dict[('tweet', 'replies_to', 'tweet')] = TransformerConv(
-                tweet_dim, out_channels, heads=heads, dropout=dropout, beta=True
-            )
-            conv_dict[('tweet', 'replied_by', 'tweet')] = TransformerConv(
-                tweet_dim, out_channels, heads=heads, dropout=dropout, beta=True
-            )
-        
+            if conv_type == 'transformer':
+                conv_dict[('tweet', 'replies_to', 'tweet')] = TransformerConv(
+                    tweet_dim, out_channels, heads=heads, dropout=dropout, beta=True
+                )
+                conv_dict[('tweet', 'replied_by', 'tweet')] = TransformerConv(
+                    tweet_dim, out_channels, heads=heads, dropout=dropout, beta=True
+                )
+            elif conv_type == 'gat':
+                conv_dict[('tweet', 'replies_to', 'tweet')] = GATConv(
+                    tweet_dim, out_channels, heads=heads, dropout=dropout,
+                    negative_slope=negative_slope, add_self_loops=add_self_loops,
+                    residual=True  # Replacement for beta gating
+                )
+                conv_dict[('tweet', 'replied_by', 'tweet')] = GATConv(
+                    tweet_dim, out_channels, heads=heads, dropout=dropout,
+                    negative_slope=negative_slope, add_self_loops=add_self_loops,
+                    residual=True
+                )
+            else:
+                raise ValueError(f"Unknown conv_type: {conv_type}")
+
         # User -> Tweet edges (heterogeneous)
         if 'user' in in_channels_dict and 'tweet' in in_channels_dict:
             user_dim = in_channels_dict['user']
             tweet_dim = in_channels_dict['tweet']
-            conv_dict[('user', 'posts', 'tweet')] = TransformerConv(
-                (user_dim, tweet_dim), out_channels, heads=heads, dropout=dropout, beta=True
-            )
-            conv_dict[('tweet', 'posted_by', 'user')] = TransformerConv(
-                (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout, beta=True
-            )
+            if conv_type == 'transformer':
+                conv_dict[('user', 'posts', 'tweet')] = TransformerConv(
+                    (user_dim, tweet_dim), out_channels, heads=heads, dropout=dropout, beta=True
+                )
+                conv_dict[('tweet', 'posted_by', 'user')] = TransformerConv(
+                    (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout, beta=True
+                )
+            elif conv_type == 'gat':
+                # Note: add_self_loops=False for bipartite (heterogeneous) edges
+                conv_dict[('user', 'posts', 'tweet')] = GATConv(
+                    (user_dim, tweet_dim), out_channels, heads=heads, dropout=dropout,
+                    negative_slope=negative_slope, add_self_loops=False,
+                    residual=True
+                )
+                conv_dict[('tweet', 'posted_by', 'user')] = GATConv(
+                    (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout,
+                    negative_slope=negative_slope, add_self_loops=False,
+                    residual=True
+                )
         
         # # User -> User edges (homogeneous)
         # if 'user' in in_channels_dict:
@@ -300,10 +330,11 @@ class TemporalHeteroGAT(nn.Module):
         heads: int = 2,
         dropout: float = 0.5,
         negative_slope: float = 0.2,
+        conv_type: str = 'transformer',
     ):
         """
         Initialize TemporalHeteroGAT.
-        
+
         Args:
             in_channels_dict: Dictionary mapping node type to input feature dim
             hidden_channels: Hidden dimension for GAT layers
@@ -312,6 +343,7 @@ class TemporalHeteroGAT(nn.Module):
             heads: Number of attention heads per layer
             dropout: Dropout probability
             negative_slope: Negative slope for LeakyReLU
+            conv_type: Type of attention layer ('transformer' or 'gat')
         """
         super().__init__()
         self.num_layers = num_layers
@@ -347,6 +379,7 @@ class TemporalHeteroGAT(nn.Module):
                     heads=heads,
                     dropout=dropout if i < num_layers - 1 else 0.0,
                     negative_slope=negative_slope,
+                    conv_type=conv_type,
                 )
             )
         
@@ -597,10 +630,11 @@ class HeteroGATLinkPrediction(nn.Module):
         dropout: float = 0.5,
         negative_slope: float = 0.2,
         link_pred_hidden_dim: int = 64,
+        conv_type: str = 'transformer',
     ):
         """
         Initialize HeteroGATLinkPrediction.
-        
+
         Args:
             in_channels_dict: Dictionary mapping node type to input feature dim
             hidden_channels: Hidden dimension for GAT layers
@@ -610,9 +644,10 @@ class HeteroGATLinkPrediction(nn.Module):
             dropout: Dropout probability
             negative_slope: Negative slope for LeakyReLU
             link_pred_hidden_dim: Hidden dimension for link predictor
+            conv_type: Type of attention layer ('transformer' or 'gat')
         """
         super().__init__()
-        
+
         # GAT encoder
         self.encoder = TemporalHeteroGAT(
             in_channels_dict=in_channels_dict,
@@ -622,6 +657,7 @@ class HeteroGATLinkPrediction(nn.Module):
             heads=heads,
             dropout=dropout,
             negative_slope=negative_slope,
+            conv_type=conv_type,
         )
         
         # Link predictor for tweet->user links

@@ -335,6 +335,9 @@ def main():
     parser.add_argument('--model-type', type=str, default='gat',
                        choices=['gat', 'gcn'],
                        help='Model architecture: gat (Graph Attention Network) or gcn (Graph Convolutional Network)')
+    parser.add_argument('--conv-type', type=str, default='transformer',
+                       choices=['transformer', 'gat'],
+                       help='Attention layer type: transformer (with beta gating) or gat (standard GATConv with residual)')
 
     # Training arguments
     parser.add_argument('--batch-size', type=int, default=32,
@@ -362,6 +365,8 @@ def main():
     if args.model_type == 'gcn':
         if args.heads != 2:  # 2 is default
             print(f"Note: GCN ignores --heads parameter (given: {args.heads})")
+        if args.conv_type != 'transformer':
+            print(f"Warning: GCN model ignores --conv-type parameter (given: {args.conv_type})")
         # Warn about dimension differences
         effective_dim = args.hidden_channels
         gat_effective_dim = args.hidden_channels * args.heads
@@ -445,6 +450,7 @@ def main():
             heads=args.heads,
             dropout=args.dropout,
             link_pred_hidden_dim=args.link_pred_hidden_dim,
+            conv_type=args.conv_type,
         ).to(args.device)
     elif args.model_type == 'gcn':
         model = HeteroGCNLinkPrediction(
@@ -568,6 +574,7 @@ def main():
             'heads': args.heads if args.model_type == 'gat' else None,
             'dropout': args.dropout,
             'link_pred_hidden_dim': args.link_pred_hidden_dim,
+            'conv_type': args.conv_type if args.model_type == 'gat' else None,
         },
         'train_losses': train_losses,
         'train_acc': train_accs,
