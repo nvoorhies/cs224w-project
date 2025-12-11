@@ -20,7 +20,7 @@ from datetime import datetime
 import time
 import psutil
 
-from src.het_gat_model import HeteroGATLinkPrediction
+from src.het_gat_model import HeteroGATLinkPrediction, HeteroGCNLinkPrediction
 from src.link_prediction_dataset import (
     LinkPredictionDataset,
     create_story_split_datasets,
@@ -332,7 +332,10 @@ def main():
                        help='Dropout probability')
     parser.add_argument('--link-pred-hidden-dim', type=int, default=64,
                        help='Hidden dimension for link predictor')
-    
+    parser.add_argument('--model-type', type=str, default='gat',
+                       choices=['gat', 'gcn'],
+                       help='Model architecture: gat (Graph Attention Network) or gcn (Graph Convolutional Network)')
+
     # Training arguments
     parser.add_argument('--batch-size', type=int, default=32,
                        help='Batch size')
@@ -354,7 +357,18 @@ def main():
                        help='Save checkpoint every N epochs')
     
     args = parser.parse_args()
-    
+
+    # Validate model-specific arguments
+    if args.model_type == 'gcn':
+        if args.heads != 2:  # 2 is default
+            print(f"Note: GCN ignores --heads parameter (given: {args.heads})")
+        # Warn about dimension differences
+        effective_dim = args.hidden_channels
+        gat_effective_dim = args.hidden_channels * args.heads
+        if effective_dim != gat_effective_dim:
+            print(f"Note: GCN uses hidden_channels={effective_dim} directly")
+            print(f"      GAT with same params would use effective dimension {gat_effective_dim}")
+
     # Create output directory
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -420,17 +434,29 @@ def main():
     }
     
     print(f"Input feature dimensions: {in_channels_dict}")
-    
-    # Create model
-    model = HeteroGATLinkPrediction(
-        in_channels_dict=in_channels_dict,
-        hidden_channels=args.hidden_channels,
-        out_channels=args.out_channels,
-        num_layers=args.num_layers,
-        heads=args.heads,
-        dropout=args.dropout,
-        link_pred_hidden_dim=args.link_pred_hidden_dim,
-    ).to(args.device)
+
+    # Create model based on model_type
+    if args.model_type == 'gat':
+        model = HeteroGATLinkPrediction(
+            in_channels_dict=in_channels_dict,
+            hidden_channels=args.hidden_channels,
+            out_channels=args.out_channels,
+            num_layers=args.num_layers,
+            heads=args.heads,
+            dropout=args.dropout,
+            link_pred_hidden_dim=args.link_pred_hidden_dim,
+        ).to(args.device)
+    elif args.model_type == 'gcn':
+        model = HeteroGCNLinkPrediction(
+            in_channels_dict=in_channels_dict,
+            hidden_channels=args.hidden_channels,
+            out_channels=args.out_channels,
+            num_layers=args.num_layers,
+            dropout=args.dropout,
+            link_pred_hidden_dim=args.link_pred_hidden_dim,
+        ).to(args.device)
+    else:
+        raise ValueError(f"Unknown model_type: {args.model_type}")
     
     print(f"Model: {model}")
     print(f"Total parameters: {sum(p.numel() for p in model.parameters()):,}")
@@ -479,6 +505,7 @@ def main():
             checkpoint_path = output_dir / f'checkpoint_epoch_{epoch}.pt'
             torch.save({
                 'epoch': epoch,
+                'model_type': args.model_type,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'val_loss': val_loss,
@@ -495,6 +522,7 @@ def main():
             best_model_path = output_dir / 'best_model.pt'
             torch.save({
                 'epoch': epoch,
+                'model_type': args.model_type,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'val_loss': val_loss,
@@ -532,6 +560,15 @@ def main():
     
     # Save final results
     results = {
+        'model_type': args.model_type,
+        'model_params': {
+            'hidden_channels': args.hidden_channels,
+            'out_channels': args.out_channels,
+            'num_layers': args.num_layers,
+            'heads': args.heads if args.model_type == 'gat' else None,
+            'dropout': args.dropout,
+            'link_pred_hidden_dim': args.link_pred_hidden_dim,
+        },
         'train_losses': train_losses,
         'train_acc': train_accs,
         'val_losses': val_losses,
