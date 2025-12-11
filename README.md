@@ -2,13 +2,13 @@
 
 Social networks have emerged as a transformative force for public opinion, from polarising politics [1] to instigating genocide [2]. Existing veracity mechanisms focus on rumour detection [3] but neglect structural analyses of how misinformation diffuses through communities.  
 
-This project analyses how rumours build communities using a Graph Transformer model for temporal heterogeneous networks. We frame the task as edge-level link prediction: given a rumour-centric thread, predict whether a tweet interaction will create a `follow_request_sent` link from the reply tweet to the target user. Our architecture couples a heterogeneous Graph Attention Network encoder (two `HeteroConv` + `GATConv` layers over tweet↔tweet, user↔tweet, tweet→user follow request, and user↔user relations) with a learned MLP link predictor. Temporal context, structural positions, and user metadata are jointly encoded, allowing the model to reason about both information flow and community formation.
+This project analyses how rumours build communities using a Graph Transformer model for temporal heterogeneous networks. We frame the task as edge-level link prediction: given a rumour-centric thread, predict whether a tweet interaction will create a `follow_request_sent` link from the reply tweet to the target user. Our architecture couples a heterogeneous Graph Transformer encoder (two `HeteroConv` + `TransformerConv` layers over tweet↔tweet and user↔tweet relations) with a learned MLP link predictor. Temporal context, structural positions, and user/tweet metadata are jointly encoded, allowing the model to reason about both information flow and interactions.
 
 # PHEME Dataset Parser & Link Prediction Pipeline
 
-A robust, Pydantic-based parser for the annotated PHEME dataset, complete with utilities to build PyTorch Geometric (PyG) heterogeneous graphs and a full link-prediction training pipeline.
+A robust, Pydantic-based parser for the annotated PHEME dataset, complete with utilities to build PyTorch Geometric (PyG) heterogeneous graphs (`HeteroData`) and a full link-prediction training pipeline.
 
-## Features
+## Data Pre-processing
 
 - **Pydantic Validation**: All JSON data validated with comprehensive Pydantic models
 - **Robust Error Handling**: Graceful handling of inconsistent or malformed data
@@ -18,20 +18,10 @@ A robust, Pydantic-based parser for the annotated PHEME dataset, complete with u
 - **Comprehensive Tests**: Full test coverage with 19 passing tests
 - **Dataset Verification**: Built-in verification script to validate and explore the dataset
 
-## Installation
-
-```bash
-# Install dependencies
-uv pip install -e .
-
-# Install development dependencies (for tests)
-uv pip install -e ".[dev]"
-```
-
 ## Requirements
 
 - Python ≥ 3.12
-- [uv](https://github.com/astral-sh/uv) (recommended for dependency management)
+- [uv](https://github.com/astral-sh/uv) (recommended for dependency management), or can run the following commands without uv
 - GPU optional (training runs on CPU, but GPU accelerates experiments)
 
 ## Installation
@@ -73,7 +63,7 @@ uv pip install -e ".[dev]"
    ├── germanwings-crash-all-rnr-threads/ (469)
    ├── gurlitt-all-rnr-threads/          (138)
    ├── ottawashooting-all-rnr-threads/   (890)
-  ├── prince-toronto-all-rnr-threads/   (233)
+   ├── prince-toronto-all-rnr-threads/   (233)
    ├── putinmissing-all-rnr-threads/     (238)
    └── sydneysiege-all-rnr-threads/      (1,221)
    ```
@@ -139,6 +129,7 @@ uv run python load_full_dataset.py
 # 3. Train the heterogeneous GAT link predictor
 #    --max-threads limits each split for quick experimentation.
 #    Remove it for a full-data run.
+#    --vis True for visualizing the first 10 input graphs (batch_size=1), their link prediction labels, the gnn-updated node embeddings and the attention weights
 uv run python train_link_prediction.py \
   --data-root data/all-rnr-annotated-threads \
   --epochs 1 \
@@ -148,9 +139,11 @@ uv run python train_link_prediction.py \
 
 Outputs are written to `outputs/` (`args.json`, `best_model.pt`, `results.json`).
 
-### Latest Accuracy Metrics
+### Preliminary Results
 
-10-epoch training run on the full dataset (batch size = 1, hidden = 64, heads = 2). Best checkpoint observed at epoch 10:
+1-epoch training run on the full dataset (batch size = 1, hidden = 64, heads = 2). 
+
+<!-- Best checkpoint observed at epoch 10: -->
 
 | Split       | Loss  | Accuracy | AUC-ROC | AUC-PR |
 |-------------|-------|----------|---------|--------|
@@ -212,23 +205,17 @@ Resume your training loop from `start_epoch`. If you frequently reuse checkpoint
 
 ## Model Architecture & Design Choices
 
-- **Encoder:** Two-layer heterogeneous Graph Attention Network (`HeteroConv` with `GATConv`) covering eight edge relations (tweet↔tweet, user↔tweet, tweet→user follow request, user→tweet follow receipt, user↔user).
+- **Encoder:** Two-layer heterogeneous Graph Attention Network (`HeteroConv` with `TransformerConv` or `GATConv`) covering interactions in tweet↔tweet and user↔tweet nodes.
 - **Hidden dimensions:** 64 hidden channels with 2 attention heads per layer (concatenated); ReLU activations and dropout between layers.
 - **Link predictor:** Multi-layer perceptron (`64 → 32 → 1`) applied to concatenated user embeddings; dropout (0.5) for regularisation.
 - **Feature design:**
   - Tweets: 30-dimensional vector (entities, engagement, metadata, temporal context, positional encodings).
   - Users: 13-dimensional profile/activity/metadata features.
 - **Training strategy:** Adaptive negative sampling per graph (ratio = 1), binary cross-entropy loss on link logits, `Adam` optimiser with `ReduceLROnPlateau` scheduler and gradient clipping.
-- **Temporal handling:** Parsed timestamps converted into continuous features (hour, weekday, scaled epoch, minutes since thread start) to capture dynamics.
+- **Temporal Encoding:** Using temporal positional encoding for tweet nodes and  parsed timestamps converted into continuous features (hour, weekday, scaled epoch, minutes since thread start) to capture dynamics in node feature.
+- **Temporal cutoff t:** Tweet nodes that occur before this cutoff t are kept in the input graph for message passing, nodes that occur after the cutoff are used in predicting link labels later on. E.g. t = median timestamp of all tweets in this thread. The reply structure used in temporal encoding for tweet nodes is also filtered by the cutoff t to ensure no temporal leakage throughout training and testing.
 - **Why this setup:** Heterogeneous attention allows tweets and users to exchange information across different relation types, while a lightweight MLP head keeps link prediction focused on user-user interactions.
 
-### What else to try
-
-- Increase `--num-layers`, `--hidden-channels`, or attention `--heads` for richer expressivity (with corresponding regularisation).
-- Add textual embeddings (e.g., sentence transformers) into the tweet feature vectors.
-- Experiment with additional negative sampling ratios or curriculum schedules.
-- Fine-tune dropout/weight decay, or introduce edge dropout to mitigate overfitting.
-- Swap the MLP link predictor for dot-product or bilinear forms if you prefer parameter sharing.
 
 ## Verification Script
 
@@ -265,13 +252,9 @@ See `examples/basic_usage.py` for comprehensive usage examples:
 uv run python examples/basic_usage.py
 ```
 
-## License
-
-MIT
-
 ## PyG Graph Builder
 
-The graph builder converts PHEME threads to PyTorch Geometric HeteroData objects with full support for heterogeneous GAT training.
+The graph builder converts PHEME threads to PyTorch Geometric HeteroData objects with full support for heterogeneous GAT/TransformerConv training.
 
 ### Quick Start
 
@@ -308,8 +291,6 @@ The heterogeneous graph includes:
 - `(tweet, replied_by, tweet)`: Reverse reply edges  
 - `(user, posts, tweet)`: Authorship edges
 - `(tweet, posted_by, user)`: Reverse authorship
-- `(user, interacts_with, user)`: User interactions (optional)
-- `(user, interacted_by, user)`: Reverse user interactions (optional)
 
 ### Features
 
@@ -326,23 +307,6 @@ The heterogeneous graph includes:
 - Activity (3): friends/followers ratio, tweets per follower, favourites per tweet
 - Metadata (3): geo enabled, default profile, default profile image
 
-### User-User Edges
-
-The builder supports multiple strategies for constructing user→user edges:
-
-```python
-# Based on reply relationships (default)
-graph = thread_to_graph(thread, user_edge_type="replies")
-
-# Based on @mentions
-graph = thread_to_graph(thread, user_edge_type="mentions")
-
-# Combine both
-graph = thread_to_graph(thread, user_edge_type="both")
-
-# No user-user edges
-graph = thread_to_graph(thread, user_edge_type="none")
-```
 
 ### PyG Dataset
 
@@ -376,7 +340,9 @@ for batch in loader:
 
 ### Labels
 
-Each graph includes multiple labels from the annotation:
+For the link prediction task, we sample positive edges that don't involve any exisiting tweet-tweet interaction in the temporally filtered input graph. We then sample the same number of negative edges.
+
+Also each graph includes multiple labels from the annotation:
 
 ```python
 graph = dataset[0]
@@ -403,3 +369,7 @@ Examples include:
 5. Batching with DataLoader
 6. Feature inspection
 7. Exploring edge types
+
+## License
+
+MIT
