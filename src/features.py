@@ -354,7 +354,7 @@ def extract_all_tweet_features(
         for tweet_id, tweet in tweets.items():
             created_at = parse_twitter_timestamp(tweet.created_at)
             timestamps.append(created_at)
-        time_cutoff = sorted(timestamps)[len(timestamps) * 2 // 4]  # Q1, Median, or Q4
+        time_cutoff = sorted(timestamps)[len(timestamps) * 1 // 4]  # Q1, Median, or Q4
         for tweet_id, tweet in tweets.items():
             created_at = parse_twitter_timestamp(tweet.created_at)
             if created_at > time_cutoff:

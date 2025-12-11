@@ -35,7 +35,7 @@ def filter_edges(x_dict, edge_index_dict):
     delta_minutes = tweet_node_features[:, delta_minutes_idx]
     
     # Calculate cutoff_t as the median of all delta_minutes
-    cutoff_t = torch.quantile(delta_minutes, 0.5, interpolation='lower').item()
+    cutoff_t = torch.quantile(delta_minutes, 0.25, interpolation='lower').item()
     # print("Median cutoff_t:", cutoff_t)  # e.g. 8.966666221618652
 
     valid_nodes = delta_minutes <= cutoff_t

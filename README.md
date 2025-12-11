@@ -139,11 +139,9 @@ uv run python train_link_prediction.py \
 
 Outputs are written to `outputs/` (`args.json`, `best_model.pt`, `results.json`).
 
-### Preliminary Results
+<!-- ### Preliminary Results
 
-1-epoch training run on the full dataset (batch size = 1, hidden = 64, heads = 2). 
-
-<!-- Best checkpoint observed at epoch 10: -->
+10-epoch training run on the full dataset (batch size = 1, hidden = 64, heads = 2). Best checkpoint observed at epoch 10:
 
 | Split       | Loss  | Accuracy | AUC-ROC | AUC-PR |
 |-------------|-------|----------|---------|--------|
@@ -152,7 +150,7 @@ Outputs are written to `outputs/` (`args.json`, `best_model.pt`, `results.json`)
 
 \*Best-validation checkpoint is used for the reported test metrics.
 
-For quick smoke tests, you can still run a single epoch with `--max-threads 100`; expect materially lower scores.
+For quick smoke tests, you can still run a single epoch with `--max-threads 100`; expect materially lower scores. -->
 
 ### Resuming from Checkpoints
 
