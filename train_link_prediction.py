@@ -17,6 +17,8 @@ import numpy as np
 from pathlib import Path
 import json
 from datetime import datetime
+import time
+import psutil
 
 from src.het_gat_model import HeteroGATLinkPrediction
 from src.link_prediction_dataset import (
@@ -35,7 +37,7 @@ def filter_edges(x_dict, edge_index_dict):
     delta_minutes = tweet_node_features[:, delta_minutes_idx]
     
     # Calculate cutoff_t as the median of all delta_minutes
-    cutoff_t = torch.quantile(delta_minutes, 0.25, interpolation='lower').item()
+    cutoff_t = torch.quantile(delta_minutes, 0.75, interpolation='lower').item()
     # print("Median cutoff_t:", cutoff_t)  # e.g. 8.966666221618652
 
     valid_nodes = delta_minutes <= cutoff_t
@@ -126,6 +128,8 @@ def train_epoch(model, train_loader, optimizer, device, vis):
     model.train()
     total_loss = 0
     num_graphs = 0
+    all_preds = []
+    all_labels = []
     
     for batch in tqdm(train_loader, desc="Training", leave=False):
         # Move batch to device
@@ -183,11 +187,23 @@ def train_epoch(model, train_loader, optimizer, device, vis):
         # Gradient clipping
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
-        
+        # Store predictions and labels
+        pred_probs = torch.sigmoid(link_pred)
+        all_preds.append(pred_probs.cpu().detach().numpy())
+        all_labels.append(edge_label.cpu().detach().numpy())
+
         total_loss += loss.item()
         num_graphs += 1
     
-    return total_loss / max(num_graphs, 1)
+    # Compute metrics
+    all_preds = np.concatenate(all_preds)
+    all_labels = np.concatenate(all_labels)
+    
+    # Accuracy (using 0.5 threshold)
+    pred_binary = (all_preds > 0.5).astype(int)
+    accuracy = (pred_binary == all_labels).mean()
+
+    return total_loss / max(num_graphs, 1), accuracy
 
 
 @torch.no_grad()
@@ -427,14 +443,17 @@ def main():
     best_val_loss = float('inf')
     patience_counter = 0
     train_losses = []
+    train_accs = []
     val_losses = []
     val_metrics = []
     
-    print("\nStarting training...")
+    start_time = time.time()
+
     for epoch in range(1, args.epochs + 1):
         # Train
-        train_loss = train_epoch(model, train_loader, optimizer, args.device, args.visualize)
+        train_loss, acc = train_epoch(model, train_loader, optimizer, args.device, args.visualize)
         train_losses.append(train_loss)
+        train_accs.append(acc)
         
         # Validate
         val_metrics_dict = evaluate(model, val_loader, args.device)
@@ -489,6 +508,15 @@ def main():
         
         print()
     
+    # End timer
+    end_time = time.time()
+    training_time = end_time - start_time
+
+    # Get CPU and memory usage
+    cpu_usage = psutil.cpu_percent()
+    memory_info = psutil.virtual_memory()
+    memory_usage = memory_info.used / (1024 ** 3)  # Convert to GB
+    
     # Load best model and evaluate on test set
     print("Evaluating on test set...")
     checkpoint = torch.load(output_dir / 'best_model.pt', weights_only=False)
@@ -505,11 +533,15 @@ def main():
     # Save final results
     results = {
         'train_losses': train_losses,
+        'train_acc': train_accs,
         'val_losses': val_losses,
         'val_metrics': val_metrics,
         'test_metrics': test_metrics,
         'best_epoch': checkpoint['epoch'],
         'best_val_loss': best_val_loss,
+        'training_time': training_time,
+        'cpu_usage': cpu_usage,
+        'memory_usage': memory_usage,
     }
     
     with open(output_dir / 'results.json', 'w') as f:
