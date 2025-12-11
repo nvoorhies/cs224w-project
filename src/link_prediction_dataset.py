@@ -239,8 +239,8 @@ class LinkPredictionDataset(PHEMEDataset):
         
         positive_pairs = set()
         for i in range(reply_edges.shape[1]):
-            parent_tweet = reply_edges[0, i].item()
-            child_tweet = reply_edges[1, i].item()
+            child_tweet = reply_edges[0, i].item()  # child replies parent tweet
+            parent_tweet = reply_edges[1, i].item()
             
             if (
                 parent_tweet in tweet_to_author
@@ -274,8 +274,6 @@ class LinkPredictionDataset(PHEMEDataset):
         Returns:
             Edge index tensor [2, num_negative]
         """
-        # TODO: negative samples should exlude any reply edges that exist in the original graph, despite the edge being the first reply after t or not.
-        # take the median time of each thread  as the cutoff, so 50% interactions in that thread  for base graph
         num_tweets = graph['tweet'].x.shape[0]
         num_users = graph['user'].x.shape[0]
         
