@@ -130,6 +130,10 @@ def train_epoch(model, train_loader, optimizer, device, vis):
     num_graphs = 0
     all_preds = []
     all_labels = []
+    all_rumour_labels = []
+    all_nonrumour_labels = []
+    all_rumour_preds = []
+    all_nonrumour_preds = []
     
     for batch in tqdm(train_loader, desc="Training", leave=False):
         # Move batch to device
@@ -166,7 +170,7 @@ def train_epoch(model, train_loader, optimizer, device, vis):
         edge_label_index, edge_label = filter_labels(edge_index_dict, edge_label_index, edge_label)
 
         if vis and num_graphs < 10: 
-            visualize_input("Edge Labels for Link Prediction Task (Green=Positive edge, Orange=Negative)", edge_index_dict, edge_label_index, edge_label, pos=pos, G=G)
+            visualize_input("Edge Labels for Link Prediction Task (Orange=Positive edge, Blue=Negative)", edge_index_dict, edge_label_index, edge_label, pos=pos, G=G)
         
         # Skip graphs without link labels
         if edge_label.numel() == 0 or edge_label_index.numel() == 0:
@@ -191,6 +195,15 @@ def train_epoch(model, train_loader, optimizer, device, vis):
         pred_probs = torch.sigmoid(link_pred)
         all_preds.append(pred_probs.cpu().detach().numpy())
         all_labels.append(edge_label.cpu().detach().numpy())
+        # Separate predictions and labels by rumour type
+        if hasattr(batch, 'y_rumour'):
+            rumour_label = batch.y_rumour.item()  # Assuming batch size of 1
+            if rumour_label == 1:  # rumour
+                all_rumour_preds.append(pred_probs.cpu().detach().numpy())
+                all_rumour_labels.append(edge_label.cpu().detach().numpy())
+            else:  # non-rumour
+                all_nonrumour_preds.append(pred_probs.cpu().detach().numpy())
+                all_nonrumour_labels.append(edge_label.cpu().detach().numpy())
 
         total_loss += loss.item()
         num_graphs += 1
@@ -203,7 +216,25 @@ def train_epoch(model, train_loader, optimizer, device, vis):
     pred_binary = (all_preds > 0.5).astype(int)
     accuracy = (pred_binary == all_labels).mean()
 
-    return total_loss / max(num_graphs, 1), accuracy
+    # Compute rumour-specific metrics
+    if len(all_rumour_preds) > 0:
+        all_rumour_preds = np.concatenate(all_rumour_preds)
+        all_rumour_labels = np.concatenate(all_rumour_labels)
+        rumour_pred_binary = (all_rumour_preds > 0.5).astype(int)
+        rumour_accuracy = (rumour_pred_binary == all_rumour_labels).mean()
+    else:
+        rumour_accuracy = 0.0
+
+    # Compute non-rumour-specific metrics
+    if len(all_nonrumour_preds) > 0:
+        all_nonrumour_preds = np.concatenate(all_nonrumour_preds)
+        all_nonrumour_labels = np.concatenate(all_nonrumour_labels)
+        nonrumour_pred_binary = (all_nonrumour_preds > 0.5).astype(int)
+        nonrumour_accuracy = (nonrumour_pred_binary == all_nonrumour_labels).mean()
+    else:
+        nonrumour_accuracy = 0.0
+
+    return total_loss / max(num_graphs, 1), accuracy, rumour_accuracy, nonrumour_accuracy
 
 
 @torch.no_grad()
@@ -214,6 +245,10 @@ def evaluate(model, loader, device):
     num_graphs = 0
     all_preds = []
     all_labels = []
+    all_rumour_labels = []
+    all_nonrumour_labels = []
+    all_rumour_preds = []
+    all_nonrumour_preds = []
     
     for batch in tqdm(loader, desc="Evaluating", leave=False):
         batch = batch.to(device)
@@ -250,6 +285,15 @@ def evaluate(model, loader, device):
         pred_probs = torch.sigmoid(link_pred)
         all_preds.append(pred_probs.cpu().numpy())
         all_labels.append(edge_label.cpu().numpy())
+                # Separate predictions and labels by rumour type
+        if hasattr(batch, 'y_rumour'):
+            rumour_label = batch.y_rumour.item()  # Assuming batch size of 1
+            if rumour_label == 1:  # rumour
+                all_rumour_preds.append(pred_probs.cpu().detach().numpy())
+                all_rumour_labels.append(edge_label.cpu().detach().numpy())
+            else:  # non-rumour
+                all_nonrumour_preds.append(pred_probs.cpu().detach().numpy())
+                all_nonrumour_labels.append(edge_label.cpu().detach().numpy())
         
         total_loss += loss.item()
         num_graphs += 1
@@ -258,6 +302,8 @@ def evaluate(model, loader, device):
         return {
             'loss': float('inf'),
             'accuracy': 0.0,
+            'accuracy - rumor': 0.0,
+            'accuracy - non rumor': 0.0,
             'auc_roc': 0.0,
             'auc_pr': 0.0,
         }
@@ -285,10 +331,30 @@ def evaluate(model, loader, device):
         auc_pr = 0.0
     
     avg_loss = total_loss / max(num_graphs, 1)
+
+        # Compute rumour-specific metrics
+    if len(all_rumour_preds) > 0:
+        all_rumour_preds = np.concatenate(all_rumour_preds)
+        all_rumour_labels = np.concatenate(all_rumour_labels)
+        rumour_pred_binary = (all_rumour_preds > 0.5).astype(int)
+        rumour_accuracy = (rumour_pred_binary == all_rumour_labels).mean()
+    else:
+        rumour_accuracy = 0.0
+
+    # Compute non-rumour-specific metrics
+    if len(all_nonrumour_preds) > 0:
+        all_nonrumour_preds = np.concatenate(all_nonrumour_preds)
+        all_nonrumour_labels = np.concatenate(all_nonrumour_labels)
+        nonrumour_pred_binary = (all_nonrumour_preds > 0.5).astype(int)
+        nonrumour_accuracy = (nonrumour_pred_binary == all_nonrumour_labels).mean()
+    else:
+        nonrumour_accuracy = 0.0
     
     return {
         'loss': avg_loss,
         'accuracy': accuracy,
+        'accuracy - rumor': rumour_accuracy,
+        'accuracy - non rumor': nonrumour_accuracy,
         'auc_roc': auc_roc,
         'auc_pr': auc_pr,
     }
@@ -444,16 +510,24 @@ def main():
     patience_counter = 0
     train_losses = []
     train_accs = []
+    train_r_accs = []
+    train_nr_accs = []
     val_losses = []
     val_metrics = []
     
     start_time = time.time()
 
+    # Initialize lists to store CPU and memory usage per epoch
+    cpu_usage_per_epoch = []
+    memory_usage_per_epoch = []
+
     for epoch in range(1, args.epochs + 1):
         # Train
-        train_loss, acc = train_epoch(model, train_loader, optimizer, args.device, args.visualize)
+        train_loss, acc, rumour_acc, nonrumour_acc = train_epoch(model, train_loader, optimizer, args.device, args.visualize)
         train_losses.append(train_loss)
         train_accs.append(acc)
+        train_r_accs.append(rumour_acc)
+        train_nr_accs.append(nonrumour_acc)
         
         # Validate
         val_metrics_dict = evaluate(model, val_loader, args.device)
@@ -461,14 +535,24 @@ def main():
         val_losses.append(val_loss)
         val_metrics.append(val_metrics_dict)
         
+        # Sample CPU and memory usage at the end of the epoch
+        cpu_usage = psutil.cpu_percent()
+        memory_info = psutil.virtual_memory()
+        memory_usage = memory_info.used / (1024 ** 3)  # Convert to GB
+
+        # Store the sampled values
+        cpu_usage_per_epoch.append(cpu_usage)
+        memory_usage_per_epoch.append(memory_usage)
+        
         # Update learning rate
         scheduler.step(val_loss)
         
         # Print metrics
         print(f"Epoch {epoch}/{args.epochs}")
         print(f"  Train Loss: {train_loss:.4f}")
-        # TODO: get train acc
-        # print(f"  Train Accuracy: {train_metrics_dict['accuracy']:.4f}")  # Added to display training accuracy
+        # print(f"  Train Accuracy: {train_accs:.4f}")  # Added to display training accuracy
+        # print(f"  Train Accuracy - rumors: {train_r_accs:.4f}")
+        # print(f"  Train Accuracy - non rumors: {train_nr_accs:.4f}")
         print(f"  Val Loss: {val_loss:.4f}")
         print(f"  Val Accuracy: {val_metrics_dict['accuracy']:.4f}")
         print(f"  Val AUC-ROC: {val_metrics_dict['auc_roc']:.4f}")
@@ -534,14 +618,16 @@ def main():
     results = {
         'train_losses': train_losses,
         'train_acc': train_accs,
+        'train_acc_r': train_r_accs,
+        'train_acc_nr': train_nr_accs,
         'val_losses': val_losses,
         'val_metrics': val_metrics,
         'test_metrics': test_metrics,
         'best_epoch': checkpoint['epoch'],
         'best_val_loss': best_val_loss,
         'training_time': training_time,
-        'cpu_usage': cpu_usage,
-        'memory_usage': memory_usage,
+        'cpu_usage_per_epoch': cpu_usage_per_epoch,
+        'memory_usage_per_epoch': memory_usage_per_epoch,
     }
     
     with open(output_dir / 'results.json', 'w') as f:

@@ -318,6 +318,102 @@ class LinkPredictor(nn.Module):
         
         return logits.squeeze(-1)  # [num_pairs]
 
+class GraphClassifier(nn.Module):
+    """
+    Binary graph classification head for predicting rumour / non-rumour threads.
+    
+    Takes node embeddings and predicts the probability of a graph is rumour.
+    """
+    
+    def __init__(
+        self,
+        node_emb_dim: int,
+        hidden_dim: int = 64,
+        dropout: float = 0.5,
+    ):
+        """
+        Initialize LinkPredictor.
+        
+        Args:
+            node_emb_dim: Dimension of node embeddings
+            hidden_dim: Hidden dimension for MLP
+            dropout: Dropout probability
+        """
+        super().__init__()
+        self.node_emb_dim = node_emb_dim
+        
+        # MLP for link prediction
+        self.mlp = nn.Sequential(
+            nn.Linear(node_emb_dim * 2, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, 1),
+        )
+    
+    def forward(
+        self,
+        src_emb: torch.Tensor,
+        dst_emb: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Predict link probability between source and destination nodes.
+        
+        Args:
+            src_emb: Source node embeddings [num_pairs, node_emb_dim]
+            dst_emb: Destination node embeddings [num_pairs, node_emb_dim]
+            
+        Returns:
+            Link probability scores [num_pairs, 1]
+        """
+        # Concatenate source and destination embeddings
+        pair_emb = torch.cat([src_emb, dst_emb], dim=1)
+        
+        # Predict link probability
+        logits = self.mlp(pair_emb)
+        
+        return logits.squeeze(-1)  # [num_pairs]
+
+    
+    # Example structure for a classification head in PyG
+import torch
+from torch_geometric.nn import HeteroConv, GCNConv, global_mean_pool
+from torch_geometric.data import HeteroData
+
+# Assume 'data' is a HeteroData object with 'num_nodes', node types, edge types
+# Assume 'model' is your GNN part producing 'out_dict' (type-specific node embeddings)
+
+# --- Classification Head ---
+class HeteroGraphClassifier(torch.nn.Module):
+    def __init__(self, in_channels, hidden_channels, out_channels, node_types):
+        super().__init__()
+        self.node_types = node_types
+        self.pool = global_mean_pool # Can be adjusted
+        # Example: Simple MLP head after aggregation
+        self.classifier = torch.nn.Sequential(
+            torch.nn.Linear(hidden_channels, hidden_channels // 2),
+            torch.nn.ReLU(),
+            torch.nn.Linear(hidden_channels // 2, out_channels)
+        )
+
+    def forward(self, out_dict, batch_dict): # batch_dict for pooling
+        graph_embeddings = []
+        for key in self.node_types:
+            # Pool node embeddings for each type
+            pooled_emb = self.pool(out_dict[key], batch_dict[key])
+            graph_embeddings.append(pooled_emb)
+
+        # Aggregate all pooled embeddings (e.g., sum them up)
+        graph_emb = torch.stack(graph_embeddings, dim=0).sum(dim=0)
+        return self.classifier(graph_emb)
+
+# Usage:
+# classifier_head = HeteroGraphClassifier(...)
+# out_dict = GNN(data) # Your GNN returns embeddings per type
+# class_logits = classifier_head(out_dict, data.batch_dict)
+
 
 class HeteroGATLinkPrediction(nn.Module):
     """
