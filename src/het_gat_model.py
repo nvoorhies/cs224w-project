@@ -9,7 +9,7 @@ the PHEME dataset.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GATConv, GATv2Conv, Linear, TransformerConv, GCN
+from torch_geometric.nn import GATConv, GATv2Conv, GraphConv, Linear, TransformerConv, GCN
 from torch_geometric.data import HeteroData
 from typing import Dict, Tuple, Optional, List
 
@@ -19,6 +19,63 @@ from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.nn.module_dict import ModuleDict
 from torch_geometric.typing import EdgeType, NodeType
 from torch_geometric.utils.hetero import check_add_self_loops
+
+
+class GraphConvWithAttention(GraphConv):
+    """GraphConv wrapper that returns uniform attention weights for compatibility.
+
+    This wrapper enables GraphConv to work with the same interface as TransformerConv
+    by optionally returning degree-normalized uniform attention weights. This maintains
+    API compatibility with the heterogeneous GAT implementation.
+    """
+
+    def forward(self, x, edge_index, edge_weight=None, size=None,
+                return_attention_weights=None):
+        """Forward pass with optional attention weight generation.
+
+        Args:
+            x: Input node features
+            edge_index: Edge indices
+            edge_weight: Optional edge weights
+            size: Size of bipartite graph (for heterogeneous edges)
+            return_attention_weights: If True, return uniform attention weights
+
+        Returns:
+            If return_attention_weights is True:
+                Tuple of (output, (edge_index, attention_weights))
+            Otherwise:
+                output
+        """
+        # Call parent forward
+        out = super().forward(x, edge_index, edge_weight, size)
+
+        # If attention weights requested, generate degree-normalized uniform weights
+        if return_attention_weights:
+            from torch_geometric.utils import degree
+
+            num_edges = edge_index.shape[1]
+
+            # Determine number of destination nodes
+            if isinstance(x, tuple):
+                num_dst = x[1].shape[0] if x[1] is not None else x[0].shape[0]
+            else:
+                num_dst = x.shape[0]
+
+            # Calculate in-degree for normalization (avoid div by zero)
+            in_deg = degree(edge_index[1], num_dst, dtype=torch.float)
+
+            # Create uniform weights normalized by in-degree: sum to 1.0 per dst node
+            uniform_weights = torch.zeros(num_edges, 1,
+                                         dtype=torch.float,
+                                         device=edge_index.device)
+            for i in range(num_edges):
+                dst = edge_index[1, i]
+                # Use max(deg, 1.0) to handle zero in-degree nodes
+                uniform_weights[i] = 1.0 / max(in_deg[dst].item(), 1.0)
+
+            return out, (edge_index, uniform_weights)
+
+        return out
 
 
 class HeteroGATLayer(nn.Module):
@@ -36,46 +93,77 @@ class HeteroGATLayer(nn.Module):
         dropout: float = 0.0,
         negative_slope: float = 0.2,
         add_self_loops: bool = True,
+        conv_type: str = 'transformer',
+        skip_connections: bool = True,
     ):
         """
         Initialize HeteroGATLayer.
-        
+
         Args:
             in_channels_dict: Dictionary mapping node type to input feature dim
             out_channels: Output dimension for each head
             heads: Number of attention heads
             dropout: Dropout probability
-            negative_slope: Negative slope for LeakyReLU
-            add_self_loops: Whether to add self-loops
+            negative_slope: Negative slope for LeakyReLU (used by GATConv)
+            add_self_loops: Whether to add self-loops (used by GATConv)
+            conv_type: Type of attention layer ('transformer' or 'gat')
         """
         super().__init__()
         self.heads = heads
         self.out_channels = out_channels
         self.dropout = dropout
-        
-        # Create a dictionary of GAT layers for each edge type
+        self.conv_type = conv_type
+
+        # Create a dictionary of attention layers for each edge type
         conv_dict = {}
-        
+
         # Tweet -> Tweet edges (homogeneous)
         if 'tweet' in in_channels_dict:
             tweet_dim = in_channels_dict['tweet']
-            conv_dict[('tweet', 'replies_to', 'tweet')] = TransformerConv(
-                tweet_dim, out_channels, heads=heads, dropout=dropout, beta=True
-            )
-            conv_dict[('tweet', 'replied_by', 'tweet')] = TransformerConv(
-                tweet_dim, out_channels, heads=heads, dropout=dropout, beta=True
-            )
-        
+            if conv_type == 'transformer':
+                conv_dict[('tweet', 'replies_to', 'tweet')] = TransformerConv(
+                    tweet_dim, out_channels, heads=heads, dropout=dropout, beta=skip_connections
+                )
+                conv_dict[('tweet', 'replied_by', 'tweet')] = TransformerConv(
+                    tweet_dim, out_channels, heads=heads, dropout=dropout, beta=skip_connections
+                )
+            elif conv_type == 'gat':
+                conv_dict[('tweet', 'replies_to', 'tweet')] = GATConv(
+                    tweet_dim, out_channels, heads=heads, dropout=dropout,
+                    negative_slope=negative_slope, add_self_loops=add_self_loops,
+                    residual=skip_connections  # Replacement for beta gating
+                )
+                conv_dict[('tweet', 'replied_by', 'tweet')] = GATConv(
+                    tweet_dim, out_channels, heads=heads, dropout=dropout,
+                    negative_slope=negative_slope, add_self_loops=add_self_loops,
+                    residual=skip_connections
+                )
+            else:
+                raise ValueError(f"Unknown conv_type: {conv_type}")
+
         # User -> Tweet edges (heterogeneous)
         if 'user' in in_channels_dict and 'tweet' in in_channels_dict:
             user_dim = in_channels_dict['user']
             tweet_dim = in_channels_dict['tweet']
-            conv_dict[('user', 'posts', 'tweet')] = TransformerConv(
-                (user_dim, tweet_dim), out_channels, heads=heads, dropout=dropout, beta=True
-            )
-            conv_dict[('tweet', 'posted_by', 'user')] = TransformerConv(
-                (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout, beta=True
-            )
+            if conv_type == 'transformer':
+                conv_dict[('user', 'posts', 'tweet')] = TransformerConv(
+                    (user_dim, tweet_dim), out_channels, heads=heads, dropout=dropout, beta=skip_connections
+                )
+                conv_dict[('tweet', 'posted_by', 'user')] = TransformerConv(
+                    (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout, beta=skip_connections
+                )
+            elif conv_type == 'gat':
+                # Note: add_self_loops=False for bipartite (heterogeneous) edges
+                conv_dict[('user', 'posts', 'tweet')] = GATConv(
+                    (user_dim, tweet_dim), out_channels, heads=heads, dropout=dropout,
+                    negative_slope=negative_slope, add_self_loops=False,
+                    residual=skip_connections
+                )
+                conv_dict[('tweet', 'posted_by', 'user')] = GATConv(
+                    (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout,
+                    negative_slope=negative_slope, add_self_loops=False,
+                    residual=skip_connections
+                )
         
         # # User -> User edges (homogeneous)
         # if 'user' in in_channels_dict:
@@ -132,6 +220,100 @@ class HeteroGATLayer(nn.Module):
         return conv_outputs  # out_dict, attention_weights_dict
 
 
+class HeteroGraphConvLayer(nn.Module):
+    """
+    Single layer of heterogeneous GCN using PyTorch Geometric's HeteroConv.
+
+    Applies GCN convolution to each edge type independently with uniform attention.
+    """
+
+    def __init__(
+        self,
+        in_channels_dict: Dict[str, int],
+        out_channels: int,
+        dropout: float = 0.0,
+    ):
+        """
+        Initialize HeteroGraphConvLayer.
+
+        Args:
+            in_channels_dict: Dictionary mapping node type to input feature dim
+            out_channels: Output dimension
+            dropout: Dropout probability
+        """
+        super().__init__()
+        self.out_channels = out_channels
+        self.dropout = dropout
+
+        # Create a dictionary of GraphConv layers for each edge type
+        conv_dict = {}
+
+        # Tweet -> Tweet edges (homogeneous)
+        if 'tweet' in in_channels_dict:
+            tweet_dim = in_channels_dict['tweet']
+            conv_dict[('tweet', 'replies_to', 'tweet')] = GraphConvWithAttention(
+                tweet_dim, out_channels, aggr='add'
+            )
+            conv_dict[('tweet', 'replied_by', 'tweet')] = GraphConvWithAttention(
+                tweet_dim, out_channels, aggr='add'
+            )
+
+        # User -> Tweet edges (heterogeneous)
+        if 'user' in in_channels_dict and 'tweet' in in_channels_dict:
+            user_dim = in_channels_dict['user']
+            tweet_dim = in_channels_dict['tweet']
+            conv_dict[('user', 'posts', 'tweet')] = GraphConvWithAttention(
+                (user_dim, tweet_dim), out_channels, aggr='add'
+            )
+            conv_dict[('tweet', 'posted_by', 'user')] = GraphConvWithAttention(
+                (tweet_dim, user_dim), out_channels, aggr='add'
+            )
+
+        # Use HeteroConv to wrap the individual conv layers
+        self.conv = HeteroConv(conv_dict, aggr='mean')
+        # Store supported edge types for filtering
+        self.supported_edge_types = set(conv_dict.keys())
+
+    def forward(
+        self,
+        x_dict: Dict[str, torch.Tensor],
+        edge_index_dict: Dict[Tuple[str, str, str], torch.Tensor],
+        return_attention_weights: bool = True):
+        """
+        Forward pass through the heterogeneous GCN layer.
+
+        Args:
+            x_dict: Dictionary mapping node type to node features
+            edge_index_dict: Dictionary mapping edge type to edge indices
+            return_attention_weights: Whether to return attention weights
+
+        Returns:
+            Tuple containing:
+                - Dictionary mapping node type to updated node features
+                - Dictionary mapping edge type to uniform attention weights
+        """
+        # Filter edge_index_dict to only include edge types we have layers for
+        filtered_edge_index_dict = {
+            edge_type: edge_index
+            for edge_type, edge_index in edge_index_dict.items()
+            if edge_type in self.supported_edge_types
+        }
+
+        # If no valid edges, return input features and empty attention weights
+        if not filtered_edge_index_dict:
+            return x_dict, {}
+
+        return_attention_weights_dict = {
+            edge_type: return_attention_weights
+            for edge_type in edge_index_dict
+        }
+
+        # HeteroConv automatically aggregates across edge types
+        conv_outputs = self.conv(x_dict, filtered_edge_index_dict, return_attention_weights_dict=return_attention_weights_dict)
+
+        return conv_outputs  # out_dict, uniform_attention_weights_dict
+
+
 class TemporalHeteroGAT(nn.Module):
     """
     Temporal Heterogeneous Graph Attention Network for link prediction.
@@ -149,10 +331,12 @@ class TemporalHeteroGAT(nn.Module):
         heads: int = 2,
         dropout: float = 0.5,
         negative_slope: float = 0.2,
+        conv_type: str = 'transformer',
+        skip_connections: bool = True,
     ):
         """
         Initialize TemporalHeteroGAT.
-        
+
         Args:
             in_channels_dict: Dictionary mapping node type to input feature dim
             hidden_channels: Hidden dimension for GAT layers
@@ -161,6 +345,7 @@ class TemporalHeteroGAT(nn.Module):
             heads: Number of attention heads per layer
             dropout: Dropout probability
             negative_slope: Negative slope for LeakyReLU
+            conv_type: Type of attention layer ('transformer' or 'gat')
         """
         super().__init__()
         self.num_layers = num_layers
@@ -188,7 +373,6 @@ class TemporalHeteroGAT(nn.Module):
                     node_type: hidden_channels * heads 
                     for node_type in in_channels_dict.keys()
                 }
-            
             self.gat_layers.append(
                 HeteroGATLayer(
                     layer_in_dict,
@@ -196,6 +380,8 @@ class TemporalHeteroGAT(nn.Module):
                     heads=heads,
                     dropout=dropout if i < num_layers - 1 else 0.0,
                     negative_slope=negative_slope,
+                    conv_type=conv_type,
+                    skip_connections=skip_connections,
                 )
             )
         
@@ -256,6 +442,115 @@ class TemporalHeteroGAT(nn.Module):
         """Get dropout rate from first GAT layer."""
         if len(self.gat_layers) > 0:
             return self.gat_layers[0].dropout
+        return 0.0
+
+
+class TemporalHeteroGCN(nn.Module):
+    """
+    Temporal Heterogeneous Graph Convolutional Network for link prediction.
+
+    This model processes heterogeneous graphs with temporal information
+    to predict links between tweets and users, using GCN layers instead of GAT.
+    """
+
+    def __init__(
+        self,
+        in_channels_dict: Dict[str, int],
+        hidden_channels: int,
+        out_channels: int,
+        num_layers: int = 2,
+        dropout: float = 0.5,
+    ):
+        """
+        Initialize TemporalHeteroGCN.
+
+        Args:
+            in_channels_dict: Dictionary mapping node type to input feature dim
+            hidden_channels: Hidden dimension for GCN layers
+            out_channels: Output dimension for node embeddings
+            num_layers: Number of GCN layers
+            dropout: Dropout probability
+        """
+        super().__init__()
+        self.num_layers = num_layers
+        self.hidden_channels = hidden_channels
+        self.out_channels = out_channels
+
+        # Input projection layers - NOTE: NO multiplication by heads for GCN
+        self.input_proj = nn.ModuleDict()
+        for node_type, in_dim in in_channels_dict.items():
+            self.input_proj[node_type] = Linear(in_dim, hidden_channels)
+
+        # GCN layers
+        self.gcn_layers = nn.ModuleList()
+        for i in range(num_layers):
+            # All layers: hidden_channels -> hidden_channels
+            layer_in_dict = {
+                node_type: hidden_channels
+                for node_type in in_channels_dict.keys()
+            }
+
+            self.gcn_layers.append(
+                HeteroGraphConvLayer(
+                    layer_in_dict,
+                    hidden_channels,
+                    dropout=dropout if i < num_layers - 1 else 0.0,
+                )
+            )
+
+        # Output projection layers
+        self.output_proj = nn.ModuleDict()
+        for node_type in in_channels_dict.keys():
+            self.output_proj[node_type] = Linear(
+                hidden_channels, out_channels
+            )
+
+    def forward(
+        self,
+        x_dict: Dict[str, torch.Tensor],
+        edge_index_dict: Dict[Tuple[str, str, str], torch.Tensor]
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Forward pass through the model.
+
+        Args:
+            x_dict: Dictionary mapping node type to node features
+            edge_index_dict: Dictionary mapping edge type to edge indices
+
+        Returns:
+            Dictionary mapping node type to final node embeddings
+        """
+        # Input projection
+        h_dict = {}
+        for node_type, x in x_dict.items():
+            h_dict[node_type] = self.input_proj[node_type](x)
+
+        # Apply GCN layers
+        for i, gcn_layer in enumerate(self.gcn_layers):
+            h_dict, att_dict = gcn_layer(h_dict, edge_index_dict)
+            if i < self.num_layers - 1:
+                # Apply activation and dropout (except last layer)
+                h_dict = {
+                    node_type: F.relu(h)
+                    for node_type, h in h_dict.items()
+                }
+                h_dict = {
+                    node_type: F.dropout(h, p=self.dropout, training=self.training)
+                    for node_type, h in h_dict.items()
+                }
+
+        # Output projection
+        out_dict = {}
+        for node_type, h in h_dict.items():
+            out_dict[node_type] = self.output_proj[node_type](h)
+
+        return out_dict, att_dict
+
+    @property
+    def dropout(self) -> float:
+        """Get dropout rate from first GCN layer."""
+        if len(self.gcn_layers) > 0:
+            return self.gcn_layers[0].dropout
         return 0.0
 
 
@@ -433,10 +728,12 @@ class HeteroGATLinkPrediction(nn.Module):
         dropout: float = 0.5,
         negative_slope: float = 0.2,
         link_pred_hidden_dim: int = 64,
+        conv_type: str = 'transformer',
+        skip_connections: bool = True,
     ):
         """
         Initialize HeteroGATLinkPrediction.
-        
+
         Args:
             in_channels_dict: Dictionary mapping node type to input feature dim
             hidden_channels: Hidden dimension for GAT layers
@@ -446,9 +743,10 @@ class HeteroGATLinkPrediction(nn.Module):
             dropout: Dropout probability
             negative_slope: Negative slope for LeakyReLU
             link_pred_hidden_dim: Hidden dimension for link predictor
+            conv_type: Type of attention layer ('transformer' or 'gat')
         """
         super().__init__()
-        
+
         # GAT encoder
         self.encoder = TemporalHeteroGAT(
             in_channels_dict=in_channels_dict,
@@ -458,6 +756,8 @@ class HeteroGATLinkPrediction(nn.Module):
             heads=heads,
             dropout=dropout,
             negative_slope=negative_slope,
+            conv_type=conv_type,
+            skip_connections=skip_connections,
         )
         
         # Link predictor for tweet->user links
@@ -515,6 +815,106 @@ class HeteroGATLinkPrediction(nn.Module):
             x_dict: Dictionary mapping node type to node features
             edge_index_dict: Dictionary mapping edge type to edge indices
             
+        Returns:
+            Dictionary mapping node type to node embeddings
+        """
+        return self.encoder(x_dict, edge_index_dict)
+
+
+class HeteroGCNLinkPrediction(nn.Module):
+    """
+    Complete model for tweet-to-user link prediction on heterogeneous graphs.
+
+    Combines TemporalHeteroGCN for node embeddings and LinkPredictor
+    for link prediction.
+    """
+
+    def __init__(
+        self,
+        in_channels_dict: Dict[str, int],
+        hidden_channels: int = 64,
+        out_channels: int = 32,
+        num_layers: int = 2,
+        dropout: float = 0.5,
+        link_pred_hidden_dim: int = 64,
+    ):
+        """
+        Initialize HeteroGCNLinkPrediction.
+
+        Args:
+            in_channels_dict: Dictionary mapping node type to input feature dim
+            hidden_channels: Hidden dimension for GCN layers
+            out_channels: Output dimension for node embeddings
+            num_layers: Number of GCN layers
+            dropout: Dropout probability
+            link_pred_hidden_dim: Hidden dimension for link predictor
+        """
+        super().__init__()
+
+        # GCN encoder
+        self.encoder = TemporalHeteroGCN(
+            in_channels_dict=in_channels_dict,
+            hidden_channels=hidden_channels,
+            out_channels=out_channels,
+            num_layers=num_layers,
+            dropout=dropout,
+        )
+
+        # Link predictor for tweet->user links
+        self.link_predictor = LinkPredictor(
+            node_emb_dim=out_channels,
+            hidden_dim=link_pred_hidden_dim,
+            dropout=dropout,
+        )
+
+        self.out_channels = out_channels
+
+    def forward(
+        self,
+        x_dict: Dict[str, torch.Tensor],
+        edge_index_dict: Dict[Tuple[str, str, str], torch.Tensor],
+        edge_label_index: Optional[torch.Tensor] = None,
+    ) -> Tuple[Dict[str, torch.Tensor], Optional[torch.Tensor]]:
+        """
+        Forward pass.
+
+        Args:
+            x_dict: Dictionary mapping node type to node features
+            edge_index_dict: Dictionary mapping edge type to edge indices
+            edge_label_index: Edge indices for link prediction [2, num_edges]
+                             If None, only returns node embeddings
+
+        Returns:
+            Tuple of (node_embeddings_dict, attention_weights_dict, link_predictions)
+        """
+        # Get node embeddings
+        node_emb_dict, att_dict = self.encoder(x_dict, edge_index_dict)
+
+        # Predict links if edge_label_index is provided
+        link_pred = None
+        if edge_label_index is not None:
+            tweet_emb = node_emb_dict['tweet']
+            user_emb = node_emb_dict['user']
+
+            src_emb = user_emb[edge_label_index[0]]
+            dst_emb = tweet_emb[edge_label_index[1]]
+
+            link_pred = self.link_predictor(src_emb, dst_emb)
+
+        return node_emb_dict, att_dict, link_pred
+
+    def encode_nodes(
+        self,
+        x_dict: Dict[str, torch.Tensor],
+        edge_index_dict: Dict[Tuple[str, str, str], torch.Tensor],
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Encode nodes to embeddings without link prediction.
+
+        Args:
+            x_dict: Dictionary mapping node type to node features
+            edge_index_dict: Dictionary mapping edge type to edge indices
+
         Returns:
             Dictionary mapping node type to node embeddings
         """
