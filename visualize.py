@@ -19,7 +19,7 @@ def visualize_input(title, edge_index_dict, edge_label_index = None, edge_label 
             src = ('user', edge_label_index[0, i].item())
             dst = ('tweet', edge_label_index[1, i].item())
             label = edge_label[i].item()
-            color = 'green' if label == 1 else 'orange'
+            color = 'orange' if label == 1 else 'blue'
             G.add_edge(src, dst, label=label, color=color)
 
     # Color nodes by type

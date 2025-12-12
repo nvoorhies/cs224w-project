@@ -44,7 +44,7 @@ def build_reply_edges(
         if parent_id in tweet_id_to_idx and child_id in tweet_id_to_idx:
             parent_idx = tweet_id_to_idx[parent_id]
             child_idx = tweet_id_to_idx[child_id]
-            edges.append([parent_idx, child_idx])
+            edges.append([child_idx, parent_idx])
 
     if not edges:
         # Return empty tensor with correct shape
