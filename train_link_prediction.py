@@ -338,6 +338,11 @@ def main():
     parser.add_argument('--conv-type', type=str, default='transformer',
                        choices=['transformer', 'gat'],
                        help='Attention layer type: transformer (with beta gating) or gat (standard GATConv with residual)')
+    parser.add_argument('--skip-connections', dest='skip_connections', action='store_true',
+                       help='Enable skip connections (beta in TransformerConv, residual in GATConv) [default: True]')
+    parser.add_argument('--no-skip-connections', dest='skip_connections', action='store_false',
+                       help='Disable skip connections (beta in TransformerConv, residual in GATConv)')
+    parser.set_defaults(skip_connections=True)
 
     # Training arguments
     parser.add_argument('--batch-size', type=int, default=32,
@@ -451,6 +456,7 @@ def main():
             dropout=args.dropout,
             link_pred_hidden_dim=args.link_pred_hidden_dim,
             conv_type=args.conv_type,
+            skip_connections=args.skip_connections,
         ).to(args.device)
     elif args.model_type == 'gcn':
         model = HeteroGCNLinkPrediction(

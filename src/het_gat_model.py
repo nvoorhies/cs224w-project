@@ -94,6 +94,7 @@ class HeteroGATLayer(nn.Module):
         negative_slope: float = 0.2,
         add_self_loops: bool = True,
         conv_type: str = 'transformer',
+        skip_connections: bool = True,
     ):
         """
         Initialize HeteroGATLayer.
@@ -121,21 +122,21 @@ class HeteroGATLayer(nn.Module):
             tweet_dim = in_channels_dict['tweet']
             if conv_type == 'transformer':
                 conv_dict[('tweet', 'replies_to', 'tweet')] = TransformerConv(
-                    tweet_dim, out_channels, heads=heads, dropout=dropout, beta=True
+                    tweet_dim, out_channels, heads=heads, dropout=dropout, beta=skip_connections
                 )
                 conv_dict[('tweet', 'replied_by', 'tweet')] = TransformerConv(
-                    tweet_dim, out_channels, heads=heads, dropout=dropout, beta=True
+                    tweet_dim, out_channels, heads=heads, dropout=dropout, beta=skip_connections
                 )
             elif conv_type == 'gat':
                 conv_dict[('tweet', 'replies_to', 'tweet')] = GATConv(
                     tweet_dim, out_channels, heads=heads, dropout=dropout,
                     negative_slope=negative_slope, add_self_loops=add_self_loops,
-                    residual=True  # Replacement for beta gating
+                    residual=skip_connections  # Replacement for beta gating
                 )
                 conv_dict[('tweet', 'replied_by', 'tweet')] = GATConv(
                     tweet_dim, out_channels, heads=heads, dropout=dropout,
                     negative_slope=negative_slope, add_self_loops=add_self_loops,
-                    residual=True
+                    residual=skip_connections
                 )
             else:
                 raise ValueError(f"Unknown conv_type: {conv_type}")
@@ -146,22 +147,22 @@ class HeteroGATLayer(nn.Module):
             tweet_dim = in_channels_dict['tweet']
             if conv_type == 'transformer':
                 conv_dict[('user', 'posts', 'tweet')] = TransformerConv(
-                    (user_dim, tweet_dim), out_channels, heads=heads, dropout=dropout, beta=True
+                    (user_dim, tweet_dim), out_channels, heads=heads, dropout=dropout, beta=skip_connections
                 )
                 conv_dict[('tweet', 'posted_by', 'user')] = TransformerConv(
-                    (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout, beta=True
+                    (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout, beta=skip_connections
                 )
             elif conv_type == 'gat':
                 # Note: add_self_loops=False for bipartite (heterogeneous) edges
                 conv_dict[('user', 'posts', 'tweet')] = GATConv(
                     (user_dim, tweet_dim), out_channels, heads=heads, dropout=dropout,
                     negative_slope=negative_slope, add_self_loops=False,
-                    residual=True
+                    residual=skip_connections
                 )
                 conv_dict[('tweet', 'posted_by', 'user')] = GATConv(
                     (tweet_dim, user_dim), out_channels, heads=heads, dropout=dropout,
                     negative_slope=negative_slope, add_self_loops=False,
-                    residual=True
+                    residual=skip_connections
                 )
         
         # # User -> User edges (homogeneous)
@@ -331,6 +332,7 @@ class TemporalHeteroGAT(nn.Module):
         dropout: float = 0.5,
         negative_slope: float = 0.2,
         conv_type: str = 'transformer',
+        skip_connections: bool = True,
     ):
         """
         Initialize TemporalHeteroGAT.
@@ -371,7 +373,6 @@ class TemporalHeteroGAT(nn.Module):
                     node_type: hidden_channels * heads 
                     for node_type in in_channels_dict.keys()
                 }
-            
             self.gat_layers.append(
                 HeteroGATLayer(
                     layer_in_dict,
@@ -380,6 +381,7 @@ class TemporalHeteroGAT(nn.Module):
                     dropout=dropout if i < num_layers - 1 else 0.0,
                     negative_slope=negative_slope,
                     conv_type=conv_type,
+                    skip_connections=skip_connections,
                 )
             )
         
@@ -631,6 +633,7 @@ class HeteroGATLinkPrediction(nn.Module):
         negative_slope: float = 0.2,
         link_pred_hidden_dim: int = 64,
         conv_type: str = 'transformer',
+        skip_connections: bool = True,
     ):
         """
         Initialize HeteroGATLinkPrediction.
@@ -658,6 +661,7 @@ class HeteroGATLinkPrediction(nn.Module):
             dropout=dropout,
             negative_slope=negative_slope,
             conv_type=conv_type,
+            skip_connections=skip_connections,
         )
         
         # Link predictor for tweet->user links
